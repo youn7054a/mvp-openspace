@@ -1,0 +1,403 @@
+/* ============================================================
+   Open Space — 레트로 네온사인 (Retro neon-sign) 테마
+   Press Start 2P(영문 픽셀) + Galmuri(한글 픽셀), 어두운 보라 배경 + 네온 글로우.
+   ============================================================ */
+
+:root {
+  /* 사용자 제공 팔레트 (User palette) */
+  --background: #140A1F;
+  --foreground: #EBEBD6;
+  --primary:    #ED5EC2;   /* 네온 핑크 */
+  --accent:     #F5C93D;   /* 네온 옐로우 */
+  --card:       #241536;
+  --secondary:  #38274A;
+  --muted:      #2E203B;
+  --border:     #403058;
+
+  /* 파생 (Derived) */
+  --primary-soft: rgba(237, 94, 194, .18);
+  --accent-soft:  rgba(245, 201, 61, .16);
+  --ink-soft:     #b9a9cf;   /* 흐린 본문 (muted text) */
+  --danger:       #ff5a6a;
+
+  --maxw: 70rem;
+  --radius: 6px;
+
+  /* 픽셀 폰트 (Pixel fonts) */
+  --font-pixel: "Press Start 2P", "Galmuri14", monospace;  /* 영문 디스플레이 */
+  --font-body:  "Galmuri11", "Press Start 2P", monospace;  /* 한글 본문 */
+  --font-mono:  "GalmuriMono11", "Press Start 2P", monospace;
+}
+
+/* 네온 글로우 헬퍼 (Neon glow) */
+@keyframes neon-flicker {
+  0%, 19%, 21%, 23%, 80%, 100% { opacity: 1; }
+  20%, 22%, 82% { opacity: .82; }
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+
+body.app {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-body);
+  font-size: 15px;
+  color: var(--foreground);
+  line-height: 1.85;
+  background-color: var(--background);
+  /* 레트로 그리드 (subtle retro grid) */
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 44px 44px;
+  background-position: center top;
+}
+body.app::before {
+  /* 상단 비네트 글로우 (top vignette glow) */
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background:
+    radial-gradient(60rem 30rem at 50% -8rem, var(--primary-soft), transparent 70%),
+    radial-gradient(40rem 24rem at 100% 0, var(--accent-soft), transparent 70%);
+}
+body.app > * { position: relative; z-index: 1; }
+
+a { color: var(--accent); text-decoration: none; text-underline-offset: 3px; }
+a:hover { text-decoration: underline; }
+
+/* ---------- 헤더 / 내비 (Header & nav) ---------- */
+.site-header {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 1rem 1.5rem; max-width: var(--maxw); margin: 0 auto; padding: 1.4rem 1.5rem;
+  border-bottom: 2px solid var(--border);
+}
+.brand { display: inline-flex; align-items: center; gap: .8rem; color: var(--foreground); }
+.brand-mark {
+  display: inline-grid; place-items: center; width: 2.6rem; height: 2.6rem;
+  font-family: var(--font-pixel); font-size: .8rem; color: var(--background);
+  background: var(--primary); border-radius: 4px;
+  box-shadow: 0 0 10px var(--primary), 0 0 22px var(--primary-soft);
+}
+.brand-text { display: flex; flex-direction: column; gap: .35rem; line-height: 1.1; }
+.brand-name {
+  font-family: var(--font-pixel); font-size: .82rem; color: var(--primary);
+  text-shadow: 0 0 6px var(--primary), 0 0 14px var(--primary-soft);
+}
+.brand-sub { font-family: var(--font-mono); font-size: .55rem; letter-spacing: .1em; color: var(--ink-soft); }
+
+.main-nav { display: flex; flex-wrap: wrap; gap: .3rem; }
+.nav-link {
+  color: var(--ink-soft); font-size: .8rem; padding: .45rem .7rem; border-radius: 4px;
+  border: 1px solid transparent;
+}
+.nav-link:hover { color: var(--foreground); text-decoration: none; border-color: var(--border); }
+.nav-link.is-active {
+  color: var(--accent); border-color: var(--accent);
+  box-shadow: 0 0 8px var(--accent-soft); text-shadow: 0 0 6px var(--accent-soft);
+}
+
+/* ---------- 컨테이너 (Content) ---------- */
+.content { max-width: var(--maxw); margin: 0 auto; padding: 2rem 1.5rem 3.5rem; }
+.site-footer {
+  max-width: var(--maxw); margin: 0 auto; padding: 1.5rem;
+  color: var(--ink-soft); font-size: .72rem; border-top: 2px solid var(--border);
+  font-family: var(--font-mono);
+}
+
+/* ---------- 타이포 (Headings) ---------- */
+h1, h2, h3 { font-family: var(--font-pixel); line-height: 1.5; color: var(--foreground); }
+h1 { font-size: clamp(1.1rem, 3.2vw, 1.7rem); }
+h2 { font-size: 1rem; margin: 2rem 0 1rem; }
+h3 { font-size: .85rem; }
+.eyebrow {
+  display: inline-block; font-family: var(--font-mono); font-size: .62rem;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--accent);
+  text-shadow: 0 0 8px var(--accent-soft);
+}
+
+/* ---------- 버튼 (Buttons) — 아케이드 네온 ---------- */
+button, .btn {
+  font-family: var(--font-pixel); font-size: .7rem; line-height: 1.4;
+  display: inline-flex; align-items: center; gap: .5rem; text-decoration: none;
+  padding: .8rem 1.1rem; border-radius: 5px; cursor: pointer;
+  color: var(--primary); background: transparent; border: 2px solid var(--primary);
+  box-shadow: 0 0 8px var(--primary-soft), inset 0 0 8px var(--primary-soft);
+  text-shadow: 0 0 6px var(--primary-soft);
+  transition: transform .08s ease, box-shadow .15s ease, background .15s ease, color .15s ease;
+}
+button:hover, .btn:hover {
+  background: var(--primary); color: var(--background); text-shadow: none;
+  box-shadow: 0 0 14px var(--primary), 0 0 28px var(--primary-soft);
+}
+button:active, .btn:active { transform: translateY(1px); }
+.btn.secondary, button.secondary {
+  color: var(--foreground); border-color: var(--border);
+  box-shadow: none; text-shadow: none;
+}
+.btn.secondary:hover, button.secondary:hover {
+  background: var(--secondary); color: var(--foreground); border-color: var(--ink-soft);
+  box-shadow: 0 0 10px rgba(0,0,0,.4);
+}
+.btn.danger, button.danger {
+  color: var(--danger); border-color: var(--danger);
+  box-shadow: 0 0 8px rgba(255,90,106,.2); text-shadow: 0 0 6px rgba(255,90,106,.25);
+}
+.btn.danger:hover, button.danger:hover {
+  background: var(--danger); color: var(--background);
+  box-shadow: 0 0 14px var(--danger);
+}
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+
+/* ---------- 폼 (Forms) ---------- */
+.field { display: flex; flex-direction: column; gap: .45rem; margin-bottom: 1.2rem; }
+.field label { font-family: var(--font-mono); font-size: .72rem; color: var(--accent); }
+.field input, .field textarea {
+  font-family: var(--font-body); font-size: .95rem; width: 100%;
+  padding: .7rem .8rem; color: var(--foreground);
+  background: var(--muted); border: 2px solid var(--border); border-radius: 5px;
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+.field input::placeholder, .field textarea::placeholder { color: #7d6f93; }
+.field input:focus, .field textarea:focus {
+  outline: none; border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft), 0 0 12px var(--primary-soft);
+}
+.field textarea { resize: vertical; min-height: 7rem; }
+
+/* ---------- 안내 (Notices) ---------- */
+.notice { padding: .85rem 1rem; border-radius: 5px; margin: 1rem 0; border: 2px solid var(--border); background: var(--card); font-size: .85rem; }
+.notice p { margin: 0; }
+.notice-info { border-color: var(--border); }
+.notice-success { border-color: var(--accent); box-shadow: 0 0 10px var(--accent-soft); color: var(--accent); }
+.notice-error { border-color: var(--danger); box-shadow: 0 0 10px rgba(255,90,106,.2); color: var(--danger); }
+
+/* ============================================================
+   주제 등록 (/topics/new)
+   ============================================================ */
+.page-hero { max-width: 44rem; margin: 1rem 0 2.5rem; }
+.hero-title { margin: 1rem 0; line-height: 1.7; }
+.hero-title span { display: block; }
+.hero-title span:first-child { color: var(--foreground); text-shadow: 0 0 8px rgba(235,235,214,.25); }
+.hero-title span:last-child {
+  color: var(--primary);
+  text-shadow: 0 0 8px var(--primary), 0 0 20px var(--primary-soft);
+  animation: neon-flicker 4.5s infinite;
+}
+.hero-lede { font-size: .92rem; color: var(--ink-soft); margin: 0; }
+
+.new-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,22rem); gap: 2.5rem; align-items: start; }
+.form-col { min-width: 0; }
+.btn-pin::before { content: "\25B6"; font-size: .8em; }  /* ▶ 아케이드 화살표 */
+.form-hint { margin: 1rem 0 0; font-size: .78rem; color: var(--ink-soft); font-family: var(--font-mono); line-height: 1.7; }
+
+/* 미리보기 카드 (Preview card) — 네온 액자 */
+.pin-preview { position: sticky; top: 1.5rem; padding-top: .5rem; min-width: 0; }
+.pin { display: none; }   /* 압정 대신 네온 테두리 (no pushpin in neon theme) */
+.pin-card {
+  position: relative; background: var(--card);
+  border: 2px solid var(--primary); border-radius: 6px;
+  padding: 1.4rem 1.3rem 1.2rem;
+  box-shadow: 0 0 14px var(--primary-soft), 0 0 40px rgba(0,0,0,.4);
+}
+.card-eyebrow { font-family: var(--font-mono); font-size: .58rem; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); }
+.card-title { font-family: var(--font-pixel); font-size: .9rem; line-height: 1.6; margin: .6rem 0 .7rem; color: var(--foreground); word-break: keep-all; }
+.card-desc { margin: 0 0 1.1rem; font-size: .9rem; color: var(--ink-soft); white-space: pre-wrap; word-break: keep-all; }
+.card-foot { display: flex; flex-direction: column; gap: .25rem; padding-top: .8rem; border-top: 1px dashed var(--border); }
+.card-host-label { font-family: var(--font-mono); font-size: .54rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-soft); }
+.card-host { color: var(--foreground); font-size: .9rem; }
+.pin-card .is-empty { color: #6f6088; }
+.card-figure { margin: .2rem 0 .9rem; border-radius: 5px; overflow: hidden; border: 1px solid var(--border); }
+.card-figure img { display: block; width: 100%; height: auto; max-height: 11rem; object-fit: cover; }
+
+/* 이미지 입력 (Image inputs) */
+.image-fields { border: 2px solid var(--border); border-radius: 6px; padding: 1.1rem 1rem .4rem; margin: 0 0 1.2rem; background: rgba(0,0,0,.15); }
+.image-fields legend { font-family: var(--font-mono); font-size: .72rem; color: var(--accent); padding: 0 .4rem; }
+.field-help { display: block; margin-bottom: .9rem; color: var(--ink-soft); font-size: .76rem; font-family: var(--font-mono); line-height: 1.7; }
+.current-image { margin-bottom: 1rem; }
+.edit-thumb { display: block; max-width: 14rem; width: 100%; height: auto; border-radius: 5px; border: 1px solid var(--border); margin-bottom: .6rem; }
+.checkbox-label { display: inline-flex; align-items: center; gap: .5rem; font-size: .82rem; color: var(--ink-soft); font-family: var(--font-mono); }
+.checkbox-label input { accent-color: var(--primary); }
+
+/* ============================================================
+   주제 목록 (/topics) — 네온 타일 벽
+   ============================================================ */
+.cta-row { display: flex; flex-wrap: wrap; gap: .7rem; margin-top: 1.4rem; }
+.topic-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: 1.6rem; margin-top: 2rem; }
+.topic-card.sticker {
+  position: relative; display: flex; flex-direction: column;
+  background: var(--card); border: 2px solid var(--border); border-radius: 6px;
+  padding: 1.3rem 1.2rem 1.1rem;
+  box-shadow: 0 0 0 rgba(0,0,0,0), 0 10px 28px rgba(0,0,0,.35);
+  transition: transform .12s ease, box-shadow .15s ease, border-color .15s ease;
+}
+/* 상단 네온 라인 (top neon bar) */
+.topic-card.sticker::before {
+  content: ""; position: absolute; left: -2px; right: -2px; top: -2px; height: 3px;
+  background: var(--primary); border-radius: 6px 6px 0 0;
+  box-shadow: 0 0 10px var(--primary), 0 0 20px var(--primary-soft);
+}
+.topic-card.sticker:hover {
+  transform: translateY(-4px); border-color: var(--primary);
+  box-shadow: 0 0 16px var(--primary-soft), 0 16px 36px rgba(0,0,0,.45);
+}
+.topic-figure { margin: 0 0 .9rem; border-radius: 5px; overflow: hidden; border: 1px solid var(--border); }
+.topic-figure img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; }
+.topic-title { font-family: var(--font-pixel); font-size: .82rem; line-height: 1.6; margin: .1rem 0 .6rem; color: var(--foreground); word-break: keep-all; }
+.topic-desc {
+  margin: 0 0 1rem; color: var(--ink-soft); white-space: pre-wrap; word-break: keep-all; font-size: .88rem;
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+}
+.topic-foot { margin-top: auto; display: flex; flex-direction: column; gap: .5rem; padding-top: .8rem; border-top: 1px dashed var(--border); }
+.topic-host { font-family: var(--font-mono); font-size: .68rem; color: var(--ink-soft); }
+.topic-status { align-self: flex-start; font-family: var(--font-mono); font-size: .6rem; letter-spacing: .04em; padding: .25rem .55rem; border-radius: 999px; border: 1px solid; }
+.topic-status.is-scheduled { color: var(--accent); border-color: var(--accent); box-shadow: 0 0 8px var(--accent-soft); }
+.topic-status.is-open { color: var(--ink-soft); border-color: var(--border); }
+
+/* ============================================================
+   타임테이블 / 관리자 (Schedule / Admin)
+   ============================================================ */
+table.schedule { border-collapse: separate; border-spacing: 0; width: 100%; background: var(--card); border: 2px solid var(--border); border-radius: 6px; overflow: hidden; }
+table.schedule th, table.schedule td { border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); padding: .75rem .8rem; text-align: left; vertical-align: top; font-size: .82rem; }
+table.schedule thead th { background: var(--secondary); font-family: var(--font-mono); font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); }
+table.schedule tbody th { font-family: var(--font-mono); color: var(--ink-soft); }
+.slot-open { color: #6f6088; }
+.slot-filled { color: var(--primary); text-shadow: 0 0 6px var(--primary-soft); }
+.slot-closed {
+  text-align: center; color: var(--accent); font-family: var(--font-mono); font-size: .76rem;
+  letter-spacing: .06em; background: repeating-linear-gradient(45deg, transparent, transparent 8px, rgba(245,201,61,.07) 8px, rgba(245,201,61,.07) 16px);
+}
+/* 타임슬롯 목록 항목 (Timeslot list item) */
+li.ts-closed { color: var(--accent); }
+.ts-when { font-family: var(--font-mono); font-size: .82rem; margin-right: .6rem; }
+.ts-tag { font-family: var(--font-mono); font-size: .72rem; color: var(--accent); }
+.ts-controls { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .4rem 0 .2rem; }
+.ts-label-input {
+  font-family: var(--font-body); font-size: .82rem; padding: .45rem .6rem;
+  background: var(--muted); border: 1px solid var(--border); border-radius: 4px;
+  color: var(--foreground); max-width: 13rem;
+}
+.ts-label-input::placeholder { color: #7d6f93; }
+
+/* 관리자 주제→슬롯 배정 (Admin schedule cell) */
+.sched-cell { display: flex; flex-direction: column; gap: .45rem; align-items: flex-start; }
+.sched-current { font-family: var(--font-mono); font-size: .76rem; color: var(--primary); }
+.sched-cell select {
+  font: inherit; font-size: .82rem; max-width: 14rem; padding: .4rem .5rem;
+  background: var(--muted); color: var(--foreground);
+  border: 1px solid var(--border); border-radius: 4px;
+}
+.schedule-section, .edit-section, .delete-section { margin: 1.5rem 0; }
+.admin-nav { margin: 0 0 1.6rem; color: var(--ink-soft); font-family: var(--font-mono); font-size: .8rem; }
+/* 타임슬롯 생성 폼 (Timeslot generator) */
+.form-row { display: flex; flex-wrap: wrap; gap: 1rem; }
+.form-row .field { flex: 1 1 9rem; }
+.slot-preview {
+  margin: .5rem 0 1.3rem; padding: .9rem 1rem; border-radius: 5px;
+  background: var(--muted); border: 1px dashed var(--border);
+  font-family: var(--font-mono); font-size: .76rem; line-height: 1.9; color: var(--ink-soft);
+}
+.slot-preview strong { color: var(--accent); }
+ul { padding-left: 1.1rem; }
+li { margin-bottom: .6rem; }
+
+/* ============================================================
+   전광판 (Display board) — 풀 네온, 한 화면에 맞춤 (NO SCROLL)
+   타임슬롯 수(--rows)에 따라 행 높이·글자가 자동 축소된다.
+   ============================================================ */
+body.board {
+  margin: 0; height: 100vh; overflow: hidden;     /* 스크롤 금지 (no scroll) */
+  color: var(--foreground); font-family: var(--font-body);
+  background-color: var(--background);
+  background-image: radial-gradient(50rem 30rem at 50% 0, var(--primary-soft), transparent 70%);
+}
+body.board .content {
+  max-width: 100%; height: 100vh; padding: 2.2vh 2.4vw 2.6vh;
+  display: flex; flex-direction: column; gap: 1vh;
+}
+.board-head {
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: .6rem 1.2rem;
+}
+.board-title {
+  margin: 0; color: var(--primary); line-height: 1.4;
+  font-family: var(--font-pixel); font-size: clamp(1rem, 3.2vh, 2rem);
+  text-shadow: 0 0 12px var(--primary), 0 0 28px var(--primary-soft);
+}
+/* 날짜 탭 (Date tabs) */
+.board-dates { display: flex; flex-wrap: wrap; gap: .5vw; }
+.board-date {
+  font-family: var(--font-mono); font-size: clamp(.7rem, 1.6vh, 1rem);
+  padding: .5vh .9vw; border: 1px solid var(--border); border-radius: 5px;
+  color: var(--ink-soft); text-decoration: none;
+}
+.board-date:hover { color: var(--foreground); text-decoration: none; }
+.board-date.is-active {
+  color: var(--accent); border-color: var(--accent);
+  box-shadow: 0 0 8px var(--accent-soft); text-shadow: 0 0 6px var(--accent-soft);
+}
+
+/* 타임슬롯 행들이 가중치대로 높이를 나눔 (세션 행은 높게, 빈 행은 낮게) */
+.board-slots {
+  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 1vh;
+}
+.board-section { min-height: 0; display: flex; flex-direction: column; }  /* flex 가중치는 인라인 */
+.board-section h2 {
+  flex: 0 0 auto; margin: 0 0 .5vh; font-family: var(--font-mono);
+  color: var(--accent); text-transform: uppercase; letter-spacing: .06em;
+  text-shadow: 0 0 10px var(--accent-soft);
+  font-size: clamp(.6rem, 1.5vh, 1rem);
+}
+/* 한 슬롯 안의 카드들이 가로 폭을 균등 분할 */
+.board-grid {
+  flex: 1 1 auto; min-height: 0; display: grid;
+  grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 1vw;
+}
+.board-session {
+  min-height: 0; overflow: hidden; display: flex; flex-direction: column;
+  justify-content: flex-start; gap: .4vh;
+  background: var(--card); border: 2px solid var(--primary); border-radius: 8px;
+  padding: 1vh 1vw; box-shadow: 0 0 14px var(--primary-soft);
+}
+.board-session .room {
+  flex: 0 0 auto; font-family: var(--font-mono); color: var(--accent);
+  font-size: clamp(.55rem, 1.2vh, .82rem);
+}
+.board-session .title {
+  font-family: var(--font-pixel); color: var(--foreground); line-height: 1.45;
+  word-break: keep-all; overflow: hidden;
+  font-size: clamp(.85rem, 1.9vh, 1.4rem);
+}
+/* 사진이 있는 세션: 배경 이미지 + 어두운 오버레이 (no extra height) */
+.board-session.has-image { background-size: cover; background-position: center; position: relative; }
+.board-session.has-image::before {
+  content: ""; position: absolute; inset: 0; border-radius: 6px;
+  background: linear-gradient(to top,
+    rgba(20,10,31,.94) 0%, rgba(20,10,31,.62) 55%, rgba(20,10,31,.4) 100%);
+}
+.board-session.has-image .room,
+.board-session.has-image .title { position: relative; z-index: 1; text-shadow: 0 1px 5px rgba(0,0,0,.85); }
+/* 빈 슬롯 카드 (Open/empty slot) — 차분하게, 채워진 세션이 돋보이도록 */
+.board-open { border: 2px dashed var(--border); box-shadow: none; background: rgba(255,255,255,.02); }
+.board-open .room { color: var(--ink-soft); }
+.board-open-title { color: #6f6088 !important; font-family: var(--font-mono) !important; }
+/* 닫힌 슬롯 카드 (Keynote/break) */
+.board-closed { border-color: var(--accent); box-shadow: 0 0 16px var(--accent-soft); align-items: center; justify-content: center; text-align: center; }
+.board-closed .title { color: var(--accent); font-size: clamp(1.2rem, 3vh, 2.4rem); }
+.board-empty { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; font-size: 3vh; color: var(--ink-soft); }
+
+/* ---------- 반응형 (Responsive) ---------- */
+@media (max-width: 52rem) {
+  .page-new { overflow-x: clip; }
+  .new-grid { grid-template-columns: minmax(0,1fr); gap: 1.75rem; }
+  .pin-preview { position: static; order: -1; width: 100%; max-width: 24rem; margin-inline: auto; }
+}
+@media (max-width: 40rem) {
+  body.app { font-size: 14px; }
+  .main-nav { width: 100%; }
+}
+
+/* ---------- 모션 최소화 (Reduced motion) ---------- */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

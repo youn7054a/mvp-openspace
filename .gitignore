@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# 환경/비밀 (Env & secrets)
+.env
+.sesskey
+
+# 데이터베이스 (Database)
+*.db
+*.db-shm
+*.db-wal
+
+# 업로드 이미지 (Uploaded images)
+uploads/
+
+# 테스트/캐시 (Caches)
+.pytest_cache/
+.uv/
+
+# OS
+.DS_Store
