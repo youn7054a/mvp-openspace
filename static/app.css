@@ -171,6 +171,24 @@ button:active, .btn:active { transform: translateY(1px); }
 .notice-info { border-color: var(--border); }
 .notice-success { border-color: var(--accent); box-shadow: 0 0 10px var(--accent-soft); color: var(--accent); }
 .notice-error { border-color: var(--danger); box-shadow: 0 0 10px rgba(255,90,106,.2); color: var(--danger); }
+/* 내 주제 관리: 저장/등록 결과 토스트 — 화면에 떠서 슬라이드 인 + 자동 사라짐 */
+.manage-toast {
+  position: fixed; top: 1.1rem; left: 50%; z-index: 1000;
+  width: max-content; max-width: 92vw; pointer-events: none;
+  filter: drop-shadow(0 10px 28px rgba(0,0,0,.5));
+  animation: manage-toast 5s ease forwards;
+}
+.manage-toast .notice { margin: 0; font-size: .95rem; }
+@keyframes manage-toast {
+  0%   { opacity: 0; transform: translate(-50%, -16px) scale(.96); }
+  7%   { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  88%  { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -8px) scale(.98); visibility: hidden; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .manage-toast { animation: manage-toast-fade 5s ease forwards; }
+  @keyframes manage-toast-fade { 0%,88% { opacity: 1; } 100% { opacity: 0; visibility: hidden; } }
+}
 
 /* ============================================================
    주제 등록 (/topics/new)

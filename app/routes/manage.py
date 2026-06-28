@@ -307,7 +307,8 @@ def _panel(session, topic: Topic, *, msg=None):
     tok = _tok(topic)
     children = [H1("내 주제 관리 (Manage My Topic)")]
     if msg:
-        children.append(msg)
+        # 화면에 떠서 슬라이드 인 + 자동 사라짐 — 스크롤 위치와 무관하게 눈에 띔
+        children.append(Div(msg, cls="manage-toast", aria_live="polite"))
     edit_form = Form(
         field("주제 제목 (Topic Title)", "title", value=topic.title),
         field("설명 (Description)", "description", value=topic.description,
