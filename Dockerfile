@@ -19,10 +19,11 @@ COPY app ./app
 COPY static ./static
 
 # SQLite + 업로드 이미지 영속 볼륨 (Persistent volume for SQLite & uploads)
-RUN mkdir -p /data /data/uploads
-ENV DATABASE_URL=sqlite:////data/openspace.db
-ENV UPLOAD_DIR=/data/uploads
-VOLUME ["/data"]
+# railway 주섯
+# RUN mkdir -p /data /data/uploads
+# ENV DATABASE_URL=sqlite:////data/openspace.db
+# ENV UPLOAD_DIR=/data/uploads
+# VOLUME ["/data"]
 
 EXPOSE 5001
 
