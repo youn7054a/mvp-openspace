@@ -21,8 +21,9 @@ def all_rooms(session: Session) -> list[Room]:
 
 
 def all_timeslots(session: Session) -> list[Timeslot]:
+    # 시간순 우선 정렬 — 칸을 시간대와 무관한 순서로 추가해도 표가 시간순 유지.
     return list(
-        session.exec(select(Timeslot).order_by(Timeslot.sort_order, Timeslot.starts_at))
+        session.exec(select(Timeslot).order_by(Timeslot.starts_at, Timeslot.sort_order))
     )
 
 

@@ -214,6 +214,8 @@ button:active, .btn:active { transform: translateY(1px); }
 .image-fields { border: 2px solid var(--border); border-radius: 6px; padding: 1.1rem 1rem .4rem; margin: 0 0 1.2rem; background: rgba(0,0,0,.15); }
 .image-fields legend { font-family: var(--font-mono); font-size: .72rem; color: var(--accent); padding: 0 .4rem; }
 .field-help { display: block; margin-bottom: .9rem; color: var(--ink-soft); font-size: .76rem; font-family: var(--font-mono); line-height: 1.7; }
+.pycon-status { margin-top: -.4rem; color: var(--accent); text-shadow: 0 0 8px var(--accent-soft); }
+.pycon-status[hidden] { display: none; }
 .current-image { margin-bottom: 1rem; }
 .edit-thumb { display: block; max-width: 14rem; width: 100%; height: auto; border-radius: 5px; border: 1px solid var(--border); margin-bottom: .6rem; }
 .checkbox-label { display: inline-flex; align-items: center; gap: .5rem; font-size: .82rem; color: var(--ink-soft); font-family: var(--font-mono); }
@@ -267,6 +269,54 @@ table.schedule tbody th { font-family: var(--font-mono); color: var(--ink-soft);
   text-align: center; color: var(--accent); font-family: var(--font-mono); font-size: .76rem;
   letter-spacing: .06em; background: repeating-linear-gradient(45deg, transparent, transparent 8px, rgba(245,201,61,.07) 8px, rgba(245,201,61,.07) 16px);
 }
+/* 내 주제 관리: 클릭형 타임테이블 (Manage page interactive timetable) */
+.schedule-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: .4rem 0 1rem; }
+.schedule-hint { color: var(--ink-soft); font-family: var(--font-mono); font-size: .76rem; margin: .2rem 0 .6rem; }
+table.manage-schedule td { text-align: center; vertical-align: middle; padding: .45rem; }
+.slot-tag { font-family: var(--font-mono); font-size: .72rem; letter-spacing: .04em; }
+td.slot-mine { background: var(--primary-soft); }
+td.slot-mine .slot-tag { color: var(--primary); text-shadow: 0 0 6px var(--primary-soft); }
+td.slot-taken { color: #6f6088; }
+td.slot-open { padding: .35rem; }
+.slot-pick {
+  font-family: var(--font-mono); font-size: .72rem; letter-spacing: .03em; cursor: pointer;
+  width: 100%; padding: .5rem .4rem; border-radius: 4px;
+  background: var(--muted); color: var(--ink-soft);
+  border: 1px dashed var(--border); transition: all .12s ease;
+}
+.slot-pick:hover, .slot-pick:focus-visible {
+  color: var(--accent); border-color: var(--accent); border-style: solid;
+  box-shadow: 0 0 8px var(--accent-soft); text-shadow: 0 0 6px var(--accent-soft);
+}
+/* 날짜 탭 (Date tabs) — 순수 CSS 라디오 토글, HTMX 스왑/정적 렌더 어디서나 동작 */
+.daytabs .day-radio { position: absolute; opacity: 0; pointer-events: none; }
+.daytabs-label { font-family: var(--font-mono); font-size: .74rem; color: var(--ink-soft); margin: 0 0 .5rem; }
+.date-tabs { display: flex; flex-wrap: wrap; gap: .6rem; margin: 0 0 1rem; }
+.date-tabs .day-tab {
+  font-family: var(--font-mono); font-size: .8rem; cursor: pointer;
+  padding: .55rem 1rem; border: 1px solid var(--border); border-radius: 6px;
+  color: var(--ink-soft); user-select: none; background: var(--muted);
+  transition: all .12s ease; white-space: nowrap;
+}
+.date-tabs .day-tab:hover { color: var(--foreground); border-color: var(--ink-soft); }
+.daytabs .day-panel { display: none; }
+/* 표 위 날짜 제목 (Date caption above each day's table) */
+.day-caption {
+  font-family: var(--font-mono); font-size: .9rem; color: var(--accent);
+  text-shadow: 0 0 8px var(--accent-soft); margin: .2rem 0 .6rem;
+  padding: .35rem 0; border-bottom: 1px dashed var(--border);
+}
+/* 선택된 날짜 탭 강조 (highlight the checked day's tab) — 최대 6일까지 */
+.daytabs .day-radio:nth-of-type(1):checked ~ .date-tabs .day-tab:nth-child(1),
+.daytabs .day-radio:nth-of-type(2):checked ~ .date-tabs .day-tab:nth-child(2),
+.daytabs .day-radio:nth-of-type(3):checked ~ .date-tabs .day-tab:nth-child(3),
+.daytabs .day-radio:nth-of-type(4):checked ~ .date-tabs .day-tab:nth-child(4),
+.daytabs .day-radio:nth-of-type(5):checked ~ .date-tabs .day-tab:nth-child(5),
+.daytabs .day-radio:nth-of-type(6):checked ~ .date-tabs .day-tab:nth-child(6) {
+  color: var(--accent); border-color: var(--accent); background: var(--accent-soft);
+  box-shadow: 0 0 10px var(--accent-soft); text-shadow: 0 0 6px var(--accent-soft);
+  font-weight: 700;
+}
 /* 타임슬롯 목록 항목 (Timeslot list item) */
 li.ts-closed { color: var(--accent); }
 .ts-when { font-family: var(--font-mono); font-size: .82rem; margin-right: .6rem; }
@@ -288,6 +338,45 @@ li.ts-closed { color: var(--accent); }
   border: 1px solid var(--border); border-radius: 4px;
 }
 .schedule-section, .edit-section, .delete-section { margin: 1.5rem 0; }
+
+/* 워드 표 방식 타임테이블 빌더 (Word-table timetable builder) */
+.tt-builder { margin: 1rem 0; }
+table.tt-edit td, table.tt-edit th { vertical-align: middle; text-align: center; }
+.tt-corner { background: var(--secondary); }
+/* 행(시간) 머리: 시각 인라인 편집 + 삭제 */
+.tt-rowhead, .tt-colhead { display: flex; align-items: center; gap: .35rem; justify-content: center; }
+.tt-time-form { display: inline-flex; align-items: center; gap: .25rem; }
+.tt-time, .tt-room-name {
+  font: inherit; font-family: var(--font-mono); font-size: .78rem;
+  padding: .3rem .35rem; background: var(--muted); color: var(--foreground);
+  border: 1px solid var(--border); border-radius: 4px;
+}
+.tt-time { width: 5.4rem; }
+.tt-room-name { width: 7rem; text-align: center; }
+.tt-dash { color: var(--ink-soft); }
+/* 삭제 ✕ 버튼 (delete row/column) */
+.tt-del {
+  font-family: var(--font-mono); font-size: .7rem; line-height: 1; cursor: pointer;
+  padding: .25rem .4rem; border-radius: 4px; color: var(--ink-soft);
+  background: transparent; border: 1px solid transparent;
+}
+.tt-del:hover, .tt-del:focus-visible {
+  color: var(--danger, #ff5d73); border-color: var(--danger, #ff5d73);
+}
+/* ＋ 추가 버튼 (add row / add column) */
+.tt-add {
+  font-family: var(--font-mono); cursor: pointer; color: var(--accent);
+  background: var(--muted); border: 1px dashed var(--border); border-radius: 6px;
+  transition: all .12s ease;
+}
+.tt-add:hover, .tt-add:focus-visible {
+  border-style: solid; border-color: var(--accent);
+  box-shadow: 0 0 8px var(--accent-soft); text-shadow: 0 0 6px var(--accent-soft);
+}
+.tt-add-col { width: 2.4rem; height: 2.4rem; font-size: 1.1rem; padding: 0; }
+.tt-addcol-cell { background: transparent; border-color: transparent; }
+.tt-addrow { margin: .5rem 0 0; }
+.tt-add-row { width: 100%; padding: .7rem; font-size: .82rem; letter-spacing: .03em; }
 .admin-nav { margin: 0 0 1.6rem; color: var(--ink-soft); font-family: var(--font-mono); font-size: .8rem; }
 /* 타임슬롯 생성 폼 (Timeslot generator) */
 .form-row { display: flex; flex-wrap: wrap; gap: 1rem; }
