@@ -103,7 +103,8 @@ _LIVE_PREVIEW_JS = """
 # PyCon 로그인으로 주제 등록을 보호한다 (Gate topic submission behind PyCon login).
 # - allauth headless 세션 엔드포인트: 인증 시 data.user.email 제공.
 # - 쿠키가 필요하므로 브라우저에서 credentials:'include' 로 호출한다.
-# - 미로그인(확정) 시 PyCon 로그인 페이지로 보낸다.
+# - 미로그인(확정) 시 버튼으로 새 창에서 로그인을 유도하고, 로그인 완료를
+#   주기적으로 확인해 자동으로 폼을 노출한다(팝업 차단 회피 위해 버튼 클릭 사용).
 # - PyCon 장애/네트워크 오류 시에는 막지 않고 수동 입력 폼을 노출한다(폴백).
 _PYCON_GATE_JS = """
 (function () {
@@ -113,35 +114,53 @@ _PYCON_GATE_JS = """
   var status = document.getElementById('pycon-status');
   var gate = document.getElementById('pycon-gate');
   var grid = document.getElementById('new-grid');
-  var done = false;
-  function reveal() {
-    if (gate) gate.hidden = true;
-    if (grid) grid.hidden = false;
+  var done = false, settled = false, poll = null;
+  function reveal() { if (gate) gate.hidden = true; if (grid) grid.hidden = false; }
+  function authedProceed(email) {
+    if (done) return; done = true;
+    if (poll) { clearInterval(poll); poll = null; }
+    if (email && input && !input.value.trim()) input.value = email;
+    if (email && status) {
+      status.textContent = 'PyCon 계정 이메일을 불러왔습니다 (' + email + ').';
+      status.hidden = false;
+    }
+    reveal();
   }
-  // 외부 응답이 늦어도 폼이 영영 안 뜨는 일이 없게 안전망 (reveal fallback).
-  var timer = setTimeout(function () {
-    if (done) return; done = true; reveal();
-  }, 5000);
-  fetch(EP, { credentials: 'include', headers: { 'Accept': 'application/json' } })
-    .then(function (res) { return res.json(); })
-    .then(function (body) {
-      if (done) return; done = true; clearTimeout(timer);
-      var authed = body && body.meta && body.meta.is_authenticated;
-      if (!authed) { window.location.replace(SIGNIN); return; }  // 로그인 요구
-      var user = body.data && body.data.user;
-      var email = user && user.email;
-      if (email && input && !input.value.trim()) input.value = email;
-      if (email && status) {
-        status.textContent =
-          'PyCon 계정 이메일을 불러왔어요 (' + email + '). (Filled from your PyCon login.)';
-        status.hidden = false;
-      }
-      reveal();
-    })
-    .catch(function () {
-      // 비로그인이 아니라 장애/네트워크 오류 — 막지 않고 수동 입력 허용.
-      if (done) return; done = true; clearTimeout(timer); reveal();
+  function check(cb) {
+    fetch(EP, { credentials: 'include', headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.json(); })
+      .then(function (b) {
+        var authed = b && b.meta && b.meta.is_authenticated;
+        var email = b && b.data && b.data.user && b.data.user.email;
+        cb(authed && email ? email : null, true);
+      })
+      .catch(function () { cb(null, false); });
+  }
+  function showLoginPrompt() {
+    if (!gate) return;
+    gate.hidden = false; gate.className = 'notice notice-info'; gate.textContent = '';
+    var msg = document.createElement('p');
+    msg.textContent = 'PyCon 로그인이 필요합니다. 아래 버튼을 누르면 새 창에서 ' +
+      '로그인할 수 있습니다. 로그인하면 자동으로 진행됩니다. ' +
+      '(Log in via PyCon in the new window — this page continues automatically.)';
+    var btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'btn'; btn.textContent = 'PyCon 로그인 (새 창)';
+    btn.addEventListener('click', function () {
+      window.open(SIGNIN, 'pycon-login', 'width=520,height=720');
+      if (!poll) poll = setInterval(function () {
+        check(function (email) { if (email) authedProceed(email); });
+      }, 3000);  // 로그인 완료를 주기적으로 확인
     });
+    gate.appendChild(msg); gate.appendChild(btn);
+  }
+  // 응답이 영영 안 와도 막히지 않게 안전망(수동 입력 허용)
+  setTimeout(function () { if (!settled) { settled = true; reveal(); } }, 8000);
+  check(function (email, ok) {
+    if (settled) return; settled = true;
+    if (email) authedProceed(email);       // 로그인됨 → 진행
+    else if (ok) showLoginPrompt();         // 확정 미로그인 → 새 창 로그인 유도
+    else reveal();                          // 외부 장애 → 막지 않고 폼 노출
+  });
 })();
 """ % (PYCON_SESSION_URL, PYCON_SIGNIN_URL)
 
@@ -186,7 +205,7 @@ def register(app) -> None:
     def home():
         return layout(
             "홈 (Home)",
-            H1("Open Space — 컨퍼런스 토론 (Conference Open Space)"),
+            H1("열린공간 (OpenSpace) — 컨퍼런스 토론 (Conference open space)"),
             P("주제를 제안하고, 매직링크로 직접 타임테이블에 등록하세요. "
               "(Propose a topic and schedule it yourself via a magic link.)"),
             Section(
@@ -235,9 +254,9 @@ def register(app) -> None:
         hero = Header(
             Span("주제 등록 (Submit Topic)", cls="eyebrow"),
             H1(Span("함께 이야기할"), Span("주제를 제안하세요"), cls="hero-title"),
-            P("오픈 스페이스는 참가자가 직접 주제를 제안하고 일정을 정하는 행사입니다. "
+            P("열린공간(OpenSpace)은 참가자가 직접 주제를 제안하고 일정을 정하는 행사입니다. "
               "아래 항목을 입력하면 오른쪽에 미리보기가 표시됩니다. "
-              "(Open Space lets participants propose topics and set the schedule. "
+              "(OpenSpace lets participants propose topics and set the schedule. "
               "Fill in the fields below and a preview appears on the right.)",
               cls="hero-lede"),
             cls="page-hero",

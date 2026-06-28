@@ -54,7 +54,8 @@ PANEL_ID = "manage-panel"
 
 # PyCon 로그인으로 '내 주제 수정'에 바로 진입 (Login → open my topic).
 # 로그인 확인되면 세션 이메일을 폼에 채워 본인 주제 조회를 자동 제출한다.
-# 미로그인이면 PyCon 로그인 페이지로 보낸다.
+# 미로그인이면 버튼으로 새 창에서 로그인을 유도하고, 완료를 주기적으로 확인해
+# 자동으로 이어간다(팝업 차단 회피 위해 버튼 클릭 사용).
 _MANAGE_LOGIN_JS = """
 (function () {
   var EP = '%s';
@@ -63,20 +64,51 @@ _MANAGE_LOGIN_JS = """
   var emailField = document.getElementById('manage-email');
   var gate = document.getElementById('manage-gate');
   if (!form || !emailField) return;
-  fetch(EP, { credentials: 'include', headers: { 'Accept': 'application/json' } })
-    .then(function (res) { return res.json(); })
-    .then(function (body) {
-      var authed = body && body.meta && body.meta.is_authenticated;
-      var email = body && body.data && body.data.user && body.data.user.email;
-      if (!authed || !email) { window.location.replace(SIGNIN); return; }  // 로그인 요구
-      emailField.value = email;
-      form.submit();  // 본인 주제 조회 (POST /manage/open)
-    })
-    .catch(function () {
-      if (gate) gate.textContent =
-        'PyCon 로그인 확인에 실패했어요. 이메일로 받은 매직링크를 사용해 주세요. ' +
-        '(Login check failed — use the magic link from your email.)';
+  var done = false, settled = false, poll = null;
+  function proceed(email) {
+    if (done) return; done = true;
+    if (poll) { clearInterval(poll); poll = null; }
+    emailField.value = email;
+    form.submit();  // 본인 주제 조회 (POST /manage/open)
+  }
+  function fail(text) { if (gate) gate.textContent = text; }
+  function check(cb) {
+    fetch(EP, { credentials: 'include', headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.json(); })
+      .then(function (b) {
+        var authed = b && b.meta && b.meta.is_authenticated;
+        var email = b && b.data && b.data.user && b.data.user.email;
+        cb(authed && email ? email : null, true);
+      })
+      .catch(function () { cb(null, false); });
+  }
+  function showLoginPrompt() {
+    if (!gate) return;
+    gate.className = 'notice notice-info'; gate.textContent = '';
+    var msg = document.createElement('p');
+    msg.textContent = 'PyCon 로그인이 필요합니다. 아래 버튼을 누르면 새 창에서 ' +
+      '로그인할 수 있습니다. 로그인하면 자동으로 진행됩니다. ' +
+      '(Log in via PyCon in the new window — this page continues automatically.)';
+    var btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'btn'; btn.textContent = 'PyCon 로그인 (새 창)';
+    btn.addEventListener('click', function () {
+      window.open(SIGNIN, 'pycon-login', 'width=520,height=720');
+      if (!poll) poll = setInterval(function () {
+        check(function (email) { if (email) proceed(email); });
+      }, 3000);  // 로그인 완료를 주기적으로 확인
     });
+    gate.appendChild(msg); gate.appendChild(btn);
+  }
+  setTimeout(function () {
+    if (!settled) { settled = true;
+      fail('PyCon 로그인 확인이 지연됩니다. 이메일로 받은 매직링크를 사용해 주세요.'); }
+  }, 8000);
+  check(function (email, ok) {
+    if (settled) return; settled = true;
+    if (email) proceed(email);              // 로그인됨 → 진행
+    else if (ok) showLoginPrompt();          // 확정 미로그인 → 새 창 로그인 유도
+    else fail('PyCon 로그인 확인에 실패했습니다. 이메일로 받은 매직링크를 사용해 주세요.');
+  });
 })();
 """ % (PYCON_SESSION_URL, PYCON_SIGNIN_URL)
 

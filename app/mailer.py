@@ -25,7 +25,7 @@ def send_magic_link(to_email: str, token: str, topic_title: str) -> str:
     """
     settings = get_settings()
     url = magic_link_url(token)
-    subject = f"[Open Space] 주제 관리 링크 (Manage your topic): {topic_title}"
+    subject = f"[열린공간 OpenSpace] 주제 관리 링크 (Manage your topic): {topic_title}"
     body_text = (
         f"안녕하세요! (Hello!)\n\n"
         f"제안하신 주제 '{topic_title}' 를 관리하려면 아래 링크를 사용하세요.\n"

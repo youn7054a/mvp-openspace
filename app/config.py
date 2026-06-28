@@ -18,7 +18,7 @@ class Settings:
         self.base_url: str = os.getenv("BASE_URL", "http://localhost:5001").rstrip("/")
         self.admin_password: str = os.getenv("ADMIN_PASSWORD", "change-me")
         self.mail_from: str = os.getenv(
-            "MAIL_FROM", "Open Space <onboarding@resend.dev>"
+            "MAIL_FROM", "OpenSpace <onboarding@resend.dev>"
         )
         self.session_secret: str = os.getenv(
             "SESSION_SECRET", "dev-insecure-session-secret-change-me"

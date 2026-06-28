@@ -15,7 +15,7 @@ settings = get_settings()
 
 def create_app() -> FastHTML:
     # 세션 서명 키로 관리자 세션 쿠키 보호 (signed session cookie)
-    app = FastHTML(secret_key=settings.session_secret, title="Open Space")
+    app = FastHTML(secret_key=settings.session_secret, title="열린공간 (OpenSpace)")
 
     # 정적 파일 (Static assets): /static/app.css
     app.mount("/static", StaticFiles(directory="static"), name="static")

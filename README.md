@@ -1,4 +1,4 @@
-# Open Space MVP
+# 열린공간 (OpenSpace)
 
 컨퍼런스 토론 주제 스케줄링 플랫폼 (A lightweight conference open-space scheduler).
 
@@ -129,7 +129,7 @@ docker build -t openspace-mvp .
 #    DATABASE_URL / UPLOAD_DIR 은 Dockerfile에서 /data 볼륨으로 기본 설정됨
 cat > prod.env <<'ENV'
 RESEND_API_KEY=re_xxxxxxxx          # 실제 Resend 키
-MAIL_FROM=Open Space <noreply@yourdomain.com>   # 인증된 도메인 주소
+MAIL_FROM=OpenSpace <noreply@yourdomain.com>   # 인증된 도메인 주소
 BASE_URL=https://openspace.yourdomain.com         # 공개 URL (매직링크에 사용)
 ADMIN_PASSWORD=<길고-랜덤한-비밀번호>
 SESSION_SECRET=<랜덤 32바이트 이상, openssl rand -hex 32>
@@ -169,7 +169,7 @@ SQLite DB 와 업로드 이미지는 컨테이너의 `/data` 에 저장됩니다
 | 변수 | 값 |
 | --- | --- |
 | `RESEND_API_KEY` | 실제 Resend 키 (없으면 매직링크가 **로그로만** 출력) |
-| `MAIL_FROM` | `Open Space <noreply@yourdomain.com>` (인증된 도메인) |
+| `MAIL_FROM` | `OpenSpace <noreply@yourdomain.com>` (인증된 도메인) |
 | `BASE_URL` | `https://${{RAILWAY_PUBLIC_DOMAIN}}` ← 공개 도메인 참조 (매직링크에 사용) |
 | `ADMIN_PASSWORD` | 길고 랜덤한 값 |
 | `SESSION_SECRET` | `openssl rand -hex 32` 결과 |

@@ -57,7 +57,7 @@ def page_head(title: str, *, auto_refresh: int | None = None):
     children = [
         Meta(charset="utf-8"),
         Meta(name="viewport", content="width=device-width, initial-scale=1"),
-        Title(f"{title} · Open Space"),
+        Title(f"{title} · 열린공간 (OpenSpace)"),
         Script(src="https://unpkg.com/htmx.org@1.9.12"),
         # 폰트 (Fonts): 레트로 네온 — Press Start 2P(영문 픽셀) + Galmuri(한글 픽셀)
         Link(rel="preconnect", href="https://fonts.googleapis.com"),
@@ -88,10 +88,10 @@ def site_header(active: str | None = None):
     ]
     brand = A(
         Span("OS", cls="brand-mark", aria_hidden="true"),
-        Span(Span("Open Space", cls="brand-name"),
-             Span("언컨퍼런스 (Unconference)", cls="brand-sub"),
+        Span(Span("열린공간", cls="brand-name"),
+             Span("OpenSpace", cls="brand-sub"),
              cls="brand-text"),
-        href="/", cls="brand", aria_label="Open Space 홈 (Home)",
+        href="/", cls="brand", aria_label="열린공간 (OpenSpace) 홈 (Home)",
     )
     return Header(
         brand,
@@ -114,7 +114,7 @@ def layout(title: str, *content, auto_refresh: int | None = None,
     if chrome:
         body_children.append(
             Footer(
-                P("Open Space MVP — 계정 없이 매직링크로 (No login, magic links only)."),
+                P("열린공간 (OpenSpace) — 계정 없이 매직링크로 (No login, magic links only)."),
                 cls="site-footer",
             )
         )
