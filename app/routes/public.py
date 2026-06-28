@@ -53,7 +53,7 @@ _LIVE_PREVIEW_JS = """
 (function () {
   var map = [
     ['f-title', 'pv-title', '제목을 입력하세요'],
-    ['f-description', 'pv-desc', '어떤 이야기를 나누고 싶나요?'],
+    ['f-description', 'pv-desc', '설명을 입력하세요'],
     ['f-host_name', 'pv-host', '익명 (Anonymous)']
   ];
   function syncText() {
@@ -162,8 +162,8 @@ def _image_fields():
 
     return Fieldset(
         Legend("주제 대표 이미지 (Topic image)"),
-        Small("주제를 한눈에 보여줄 이미지를 올리거나 링크를 붙여넣으세요. (선택) "
-              "(Upload a file or paste an image link — optional.)",
+        Small("주제를 대표하는 이미지를 업로드하거나 이미지 URL을 입력하세요. (선택) "
+              "(Upload an image file or enter an image URL — optional.)",
               cls="field-help"),
         Div(
             Label("파일 업로드 (Upload)", fr="f-image_file"),
@@ -234,10 +234,11 @@ def register(app) -> None:
     def topic_new_form():
         hero = Header(
             Span("주제 등록 (Submit Topic)", cls="eyebrow"),
-            H1(Span("열고 싶은 대화를"), Span("벽에 붙여주세요"), cls="hero-title"),
-            P("오픈 스페이스는 참가자가 직접 주제를 제안하고 일정을 잡는 자리예요. "
-              "카드를 채우면 오른쪽 미리보기가 함께 완성됩니다. "
-              "(Fill the card — the pinned preview fills in as you type.)",
+            H1(Span("함께 이야기할"), Span("주제를 제안하세요"), cls="hero-title"),
+            P("오픈 스페이스는 참가자가 직접 주제를 제안하고 일정을 정하는 행사입니다. "
+              "아래 항목을 입력하면 오른쪽에 미리보기가 표시됩니다. "
+              "(Open Space lets participants propose topics and set the schedule. "
+              "Fill in the fields below and a preview appears on the right.)",
               cls="hero-lede"),
             cls="page-hero",
         )
@@ -246,29 +247,30 @@ def register(app) -> None:
                   placeholder="you@example.com"),
             P(id="pycon-status", cls="field-help pycon-status", hidden=True),
             field("별명 (Nickname)", "host_name", required=False,
-                  placeholder="비워두면 익명으로 표시돼요 (optional)"),
+                  placeholder="비워두면 익명으로 표시됩니다 (선택)"),
             field("주제 제목 (Topic Title)", "title",
                   placeholder="예: 파이썬 타입 힌트, 어디까지 써봤나요?"),
             field("설명 (Description)", "description", textarea=True, required=False,
-                  placeholder="무엇을, 왜 이야기하고 싶은지 한두 문장으로 적어주세요."),
+                  placeholder="무엇을 왜 이야기하고 싶은지 한두 문장으로 설명해 주세요."),
             _image_fields(),
-            Button("카드 붙이기 (Pin my topic)", type="submit", cls="btn btn-pin"),
-            P("제출하면 관리용 매직링크가 이메일로 전송됩니다. "
-              "이 링크로 주제를 수정하거나 일정을 잡을 수 있어요. "
-              "(A private magic link will be emailed to you.)", cls="form-hint"),
+            Button("주제 등록 (Submit)", type="submit", cls="btn btn-pin"),
+            P("등록하면 관리용 매직링크가 이메일로 전송됩니다. "
+              "이 링크로 주제를 수정하거나 일정을 등록할 수 있습니다. "
+              "(After you submit, a private magic link is emailed to you "
+              "for editing and scheduling.)", cls="form-hint"),
             method="post", action="/topics/new", enctype="multipart/form-data",
             cls="topic-form",
         )
         preview = Aside(
             Div(cls="pin"),
             Article(
-                Span("제안 주제 (Topic)", cls="card-eyebrow"),
+                Span("미리보기 (Preview)", cls="card-eyebrow"),
                 Div(
                     Img(id="pv-image", alt="주제 대표 이미지 미리보기 (Topic image preview)"),
                     id="pv-figure", cls="card-figure", hidden=True,
                 ),
                 H2("제목을 입력하세요", id="pv-title", cls="card-title is-empty"),
-                P("어떤 이야기를 나누고 싶나요?", id="pv-desc",
+                P("설명을 입력하세요", id="pv-desc",
                   cls="card-desc is-empty"),
                 Footer(
                     Span("제안자 (Host)", cls="card-host-label"),

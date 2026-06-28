@@ -436,7 +436,7 @@ def test_manage_login_also_emails_magic_link(client, monkeypatch):
                     follow_redirects=False)
     assert r.status_code == 303
     assert sent and sent[0][0] == "me@x.com"          # 메일 발송됨
-    assert "이메일로도 보냈" in client.get(r.headers["location"]).text
+    assert "이메일로도 전송" in client.get(r.headers["location"]).text
 
 
 def test_manage_login_multiple_topics_choose(client):

@@ -215,11 +215,11 @@ def _schedule_section(session, topic: Topic):
         )
         children.append(notice(f"현재 배정 (Scheduled): {current_label}",
                                kind="success"))
-        children.append(P("표에서 다른 빈 칸을 누르면 자리를 옮길 수 있어요. "
-                          "(Tap another open cell to move.)", cls="schedule-hint"))
+        children.append(P("표에서 다른 빈 칸을 선택하면 자리를 변경할 수 있습니다. "
+                          "(Select another open cell to move.)", cls="schedule-hint"))
     else:
-        children.append(P("아래 표에서 원하는 빈 칸을 눌러 등록하세요. "
-                          "(Tap an open cell below to register.)", cls="schedule-hint"))
+        children.append(P("아래 표에서 원하는 빈 칸을 선택해 등록하세요. "
+                          "(Select an open cell below to register.)", cls="schedule-hint"))
 
     children.append(_schedule_picker(session, topic, entry, rooms, timeslots))
 
@@ -378,8 +378,9 @@ def register(app) -> None:
                 )
             topic._raw_token = token
             # 로그인으로 진입했을 때: 매직링크도 메일로 보냈다고 한 번 안내
-            msg = notice("관리용 매직링크를 이메일로도 보냈어요. 다음엔 메일의 링크로 "
-                         "바로 들어올 수 있어요. (We also emailed you the magic link.)",
+            msg = notice("관리용 매직링크를 이메일로도 전송했습니다. 다음에는 이메일의 "
+                         "링크로 바로 접속할 수 있습니다. "
+                         "(We also emailed you the magic link.)",
                          kind="success") if sent else None
             return layout("내 주제 관리 (Manage My Topic)",
                           _panel(session, topic, msg=msg))
