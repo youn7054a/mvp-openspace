@@ -143,6 +143,51 @@ docker run -d --name openspace -p 5001:5001 \
   openspace-mvp
 ```
 
+## Railway 배포 (Railway)
+
+Railway는 저장소의 **Dockerfile 을 자동 감지**해 빌드합니다(`railway.toml` 로 명시됨).
+컨테이너는 Railway가 주입하는 **`$PORT`** 에 바인딩하도록 이미 설정돼 있어 추가 작업이 필요 없습니다.
+
+**1) 프로젝트 생성**
+
+- 대시보드에서 **New Project → Deploy from GitHub repo** → 이 저장소 선택
+  (또는 CLI: `npm i -g @railway/cli && railway login && railway init && railway up`)
+- 빌더는 `railway.toml` 의 `DOCKERFILE` 로 자동 설정됩니다.
+
+**2) 영속 볼륨 연결 (필수)**
+
+SQLite DB 와 업로드 이미지는 컨테이너의 `/data` 에 저장됩니다. 볼륨을 붙이지 않으면
+**재배포·재시작 때마다 데이터가 사라집니다.**
+
+- 서비스 → **Variables/Settings → Volumes → New Volume**
+- **Mount path** 를 `/data` 로 지정 (Dockerfile 의 `DATABASE_URL=/data/...`, `UPLOAD_DIR=/data/uploads` 와 일치)
+
+**3) 환경 변수 설정**
+
+서비스 → **Variables** 에 입력:
+
+| 변수 | 값 |
+| --- | --- |
+| `RESEND_API_KEY` | 실제 Resend 키 (없으면 매직링크가 **로그로만** 출력) |
+| `MAIL_FROM` | `Open Space <noreply@yourdomain.com>` (인증된 도메인) |
+| `BASE_URL` | `https://${{RAILWAY_PUBLIC_DOMAIN}}` ← 공개 도메인 참조 (매직링크에 사용) |
+| `ADMIN_PASSWORD` | 길고 랜덤한 값 |
+| `SESSION_SECRET` | `openssl rand -hex 32` 결과 |
+
+> `DATABASE_URL`·`UPLOAD_DIR` 는 Dockerfile 에서 `/data` 로 이미 지정되어 있어 **건드리지 마세요**
+> (볼륨 마운트 경로와 일치해야 함).
+
+**4) 공개 도메인 생성 & 접속**
+
+- 서비스 → **Settings → Networking → Generate Domain** 으로 공개 URL 발급
+- `BASE_URL` 을 그 도메인으로 두면 매직링크가 올바른 주소로 생성됩니다
+  (위 `${{RAILWAY_PUBLIC_DOMAIN}}` 참조를 쓰면 자동)
+- 배포 후 `/admin` 로그인 → (선택) **데모 데이터 채우기** 로 동작 확인
+
+> ⚠️ Railway 볼륨은 **단일 인스턴스** 기준입니다. SQLite는 단일 라이터라 잘 맞지만,
+> 수평 확장(레플리카)이 필요해지면 PostgreSQL 로 옮기세요(`DATABASE_URL` 만 교체).
+> TLS·HTTPS 는 Railway 도메인에서 자동 처리됩니다.
+
 운영 체크리스트:
 
 - [ ] **`ADMIN_PASSWORD`·`SESSION_SECRET`** 을 기본값에서 강한 랜덤값으로 교체
