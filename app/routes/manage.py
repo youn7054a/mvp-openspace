@@ -13,21 +13,35 @@ from fasthtml.common import (
     Input,
     Label,
     Legend,
-    Option,
     P,
+    RedirectResponse,
+    Script,
     Section,
-    Select,
     Small,
+    Span,
+    Table,
+    Td,
+    Th,
+    Thead,
+    Tr,
 )
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 from starlette.datastructures import UploadFile
 
-from ..components import field, layout, notice
+from ..components import (
+    PYCON_SESSION_URL,
+    PYCON_SIGNIN_URL,
+    date_tabs,
+    field,
+    layout,
+    notice,
+)
 from ..database import get_session
+from ..mailer import send_magic_link
 from ..models import ScheduleEntry, Timeslot, Topic, utcnow
 from ..queries import all_rooms, all_timeslots, entry_for_topic, schedule_map
-from ..security import hash_token
+from ..security import generate_token, hash_token, token_expiry
 from ..uploads import (
     UploadError,
     delete_local_image,
@@ -36,6 +50,64 @@ from ..uploads import (
 )
 
 PANEL_ID = "manage-panel"
+
+
+# PyCon 로그인으로 '내 주제 수정'에 바로 진입 (Login → open my topic).
+# 로그인 확인되면 세션 이메일을 폼에 채워 본인 주제 조회를 자동 제출한다.
+# 미로그인이면 PyCon 로그인 페이지로 보낸다.
+_MANAGE_LOGIN_JS = """
+(function () {
+  var EP = '%s';
+  var SIGNIN = '%s';
+  var form = document.getElementById('manage-resolve');
+  var emailField = document.getElementById('manage-email');
+  var gate = document.getElementById('manage-gate');
+  if (!form || !emailField) return;
+  fetch(EP, { credentials: 'include', headers: { 'Accept': 'application/json' } })
+    .then(function (res) { return res.json(); })
+    .then(function (body) {
+      var authed = body && body.meta && body.meta.is_authenticated;
+      var email = body && body.data && body.data.user && body.data.user.email;
+      if (!authed || !email) { window.location.replace(SIGNIN); return; }  // 로그인 요구
+      emailField.value = email;
+      form.submit();  // 본인 주제 조회 (POST /manage/open)
+    })
+    .catch(function () {
+      if (gate) gate.textContent =
+        'PyCon 로그인 확인에 실패했어요. 이메일로 받은 매직링크를 사용해 주세요. ' +
+        '(Login check failed — use the magic link from your email.)';
+    });
+})();
+""" % (PYCON_SESSION_URL, PYCON_SIGNIN_URL)
+
+
+def _issue_token(session, topic: Topic) -> str:
+    """본인 확인된 주제에 새 매직링크 토큰 발급 (mint a fresh edit token).
+
+    직접 수정 페이지로 바로 보내는 동시에, 같은 링크를 이메일로도 발송한다 —
+    다음엔 메일의 매직링크로 바로 들어올 수 있게.
+
+    주의: 이메일은 클라이언트(PyCon 세션)에서 전달되어 서버가 직접 검증하지
+    못한다 — 매직링크와 동일한 신뢰 수준의 편의 기능이다. (README 보안 참고)
+    """
+    raw, token_hash = generate_token()
+    topic.edit_token_hash = token_hash
+    topic.edit_token_expires_at = token_expiry()
+    topic.updated_at = utcnow()
+    session.add(topic)
+    session.commit()
+    send_magic_link(topic.host_email, raw, topic.title)
+    return raw
+
+
+def _topics_for_email(session, email: str) -> list[Topic]:
+    """이메일로 본인 주제 조회 (삭제 제외, 대소문자 무시)."""
+    email = email.lower()
+    rows = session.exec(
+        select(Topic).where(Topic.deleted_at == None)  # noqa: E711
+        .order_by(Topic.created_at.desc())
+    )
+    return [t for t in rows if (t.host_email or "").strip().lower() == email]
 
 
 def _load_topic(session, token: str) -> Topic | None:
@@ -51,76 +123,113 @@ def _load_topic(session, token: str) -> Topic | None:
     return topic
 
 
-def _open_slot_options(session, *, include_current: ScheduleEntry | None = None):
-    """예약 가능한 슬롯 옵션 (Open room×timeslot options)."""
-    rooms = all_rooms(session)
-    timeslots = all_timeslots(session)
-    taken = schedule_map(session)
-    options = []
+def _slot_cell(topic: Topic, room, ts, entry, current_entry):
+    """타임테이블 한 칸 (One room×timeslot cell).
+
+    내 자리·사용 중·빈 칸을 색으로 구분하고, 빈 칸은 눌러서 바로 등록/이동.
+    """
+    is_mine = current_entry and entry and entry.id == current_entry.id
+    if is_mine:
+        return Td(Span("✓ 내 주제 (My topic)", cls="slot-tag"),
+                  cls="slot-mine", aria_label="현재 내 자리 (My current slot)")
+    if entry:  # 다른 주제가 사용 중 (taken by someone else)
+        return Td(Span("사용 중 (Taken)", cls="slot-tag"), cls="slot-taken")
+    # 빈 칸 — 누르면 이 자리로 등록/이동 (open: click to take/move here)
+    label = "여기로 이동 (Move here)" if current_entry else "이 자리 잡기 (Take)"
+    return Td(
+        Button(label, type="button",
+               hx_post=f"/manage/{_tok(topic)}/schedule",
+               hx_vals=f'{{"slot": "{room.id}:{ts.id}"}}',
+               hx_target=f"#{PANEL_ID}", hx_swap="outerHTML",
+               cls="slot-pick"),
+        cls="slot-open",
+    )
+
+
+def _schedule_grid(session, topic: Topic, current_entry, rooms, timeslots, taken):
+    """클릭형 타임테이블 (Interactive timetable) — 빈 칸을 눌러 슬롯 선택."""
+    header = Tr(Th("시간 / 룸 (Time / Room)"), *[Th(r.name) for r in rooms])
+    rows = []
     for ts in timeslots:
-        if ts.is_closed:  # 닫힌 슬롯은 예약 불가 (closed slots not schedulable)
+        if ts.is_closed:  # 닫힌 슬롯(키노트·휴식 등)은 예약 불가
+            rows.append(Tr(
+                Th(ts.time_label, scope="row"),
+                Td(ts.closed_label, colspan=len(rooms), cls="slot-closed"),
+            ))
             continue
+        cells = [Th(ts.time_label, scope="row")]
         for room in rooms:
-            key = (room.id, ts.id)
-            occupied = key in taken
-            if occupied and not (
-                include_current and taken[key].id == include_current.id
-            ):
-                continue
-            options.append(
-                Option(f"{room.name} · {ts.time_label}", value=f"{room.id}:{ts.id}")
-            )
-    return options
+            entry = taken.get((room.id, ts.id))
+            cells.append(_slot_cell(topic, room, ts, entry, current_entry))
+        rows.append(Tr(*cells))
+    return Div(
+        Table(Thead(header), *rows, cls="schedule manage-schedule"),
+        cls="schedule-scroll",
+    )
+
+
+def _schedule_picker(session, topic: Topic, current_entry, rooms, timeslots):
+    """타임테이블 선택 영역 — 여러 날이면 날짜 탭으로 나눠 보여준다.
+
+    공용 date_tabs(순수 CSS 라디오 탭)로 렌더하므로 HTMX 패널 스왑 후에도
+    동작이 유지된다. 각 날짜 표 위에는 날짜 제목이 붙는다.
+    """
+    taken = schedule_map(session)
+    days = sorted({ts.starts_at.date().isoformat() for ts in timeslots})
+
+    # 현재 내 자리가 있는 날을 기본 선택 (default to the day my topic sits on).
+    default_day = None
+    if current_entry:
+        cur_ts = session.get(Timeslot, current_entry.timeslot_id)
+        if cur_ts:
+            default_day = cur_ts.starts_at.date().isoformat()
+
+    def render_day(day: str):
+        day_slots = [ts for ts in timeslots
+                     if ts.starts_at.date().isoformat() == day]
+        return _schedule_grid(session, topic, current_entry, rooms,
+                              day_slots, taken)
+
+    return date_tabs(days, render_day, id_prefix="mday", default_day=default_day)
 
 
 def _schedule_section(session, topic: Topic):
-    """타임테이블 등록/변경/취소 UI."""
+    """타임테이블 등록/변경/취소 UI — 표에서 빈 칸을 눌러 선택."""
     entry = entry_for_topic(session, topic.id)
+    rooms = all_rooms(session)
+    timeslots = all_timeslots(session)
+    children = [H2("타임테이블 (Timetable)")]
+
+    if not rooms or not timeslots:
+        children.append(notice(
+            "아직 룸/타임슬롯이 없습니다. 관리자에게 문의하세요. "
+            "(No rooms/timeslots yet — contact the admin.)"
+        ))
+        return Section(*children, cls="schedule-section")
+
     if entry:
-        room = next((r for r in all_rooms(session) if r.id == entry.room_id), None)
+        room = next((r for r in rooms if r.id == entry.room_id), None)
         ts = session.get(Timeslot, entry.timeslot_id)
         current_label = (
             f"{room.name if room else '?'} · {ts.time_label if ts else '?'}"
         )
-        options = _open_slot_options(session, include_current=entry)
-        change_form = Form(
-            Select(*options, name="slot", aria_label="새 슬롯 (New slot)"),
-            Button("슬롯 변경 (Change slot)", type="submit", cls="secondary"),
-            hx_post=f"/manage/{_tok(topic)}/schedule",
-            hx_target=f"#{PANEL_ID}", hx_swap="outerHTML",
-        ) if options else P("변경 가능한 빈 슬롯이 없습니다. (No other open slots.)")
-        cancel_form = Form(
+        children.append(notice(f"현재 배정 (Scheduled): {current_label}",
+                               kind="success"))
+        children.append(P("표에서 다른 빈 칸을 누르면 자리를 옮길 수 있어요. "
+                          "(Tap another open cell to move.)", cls="schedule-hint"))
+    else:
+        children.append(P("아래 표에서 원하는 빈 칸을 눌러 등록하세요. "
+                          "(Tap an open cell below to register.)", cls="schedule-hint"))
+
+    children.append(_schedule_picker(session, topic, entry, rooms, timeslots))
+
+    if entry:
+        children.append(Form(
             Button("등록 취소 (Cancel registration)", type="submit", cls="danger"),
             hx_post=f"/manage/{_tok(topic)}/unschedule",
             hx_target=f"#{PANEL_ID}", hx_swap="outerHTML",
-        )
-        return Section(
-            H2("타임테이블 (Timetable)"),
-            notice(f"현재 배정 (Scheduled): {current_label}", kind="success"),
-            change_form,
-            cancel_form,
-            cls="schedule-section",
-        )
-
-    options = _open_slot_options(session)
-    if not options:
-        register = notice(
-            "예약 가능한 슬롯이 없습니다. 관리자에게 문의하세요. "
-            "(No open slots — contact the admin.)"
-        )
-    else:
-        register = Form(
-            Select(*options, name="slot", aria_label="슬롯 선택 (Choose a slot)"),
-            Button("타임테이블 등록 (Register)", type="submit"),
-            hx_post=f"/manage/{_tok(topic)}/schedule",
-            hx_target=f"#{PANEL_ID}", hx_swap="outerHTML",
-        )
-    return Section(
-        H2("타임테이블 (Timetable)"),
-        P("아직 등록되지 않았습니다. 빈 슬롯을 선택하세요. (Not scheduled yet.)"),
-        register,
-        cls="schedule-section",
-    )
+        ))
+    return Section(*children, cls="schedule-section")
 
 
 # 토큰을 토픽에 임시 보관해 폼 action 생성에 사용 (raw token passed via closure)
@@ -191,8 +300,73 @@ def _panel(session, topic: Topic, *, msg=None):
 
 
 def register(app) -> None:
+    # ---- 로그인 기반 '내 주제 수정' 진입 (Login-based entry, no token in URL) ----
+    @app.get("/manage")
+    def manage_login():
+        # 숨은 폼: 로그인 확인되면 JS가 이메일을 채워 자동 제출한다.
+        resolve = Form(
+            Input(type="hidden", id="manage-email", name="email"),
+            id="manage-resolve", method="post", action="/manage/open",
+        )
+        gate = P("PyCon 로그인 확인 중… (Checking your PyCon login…)",
+                 id="manage-gate", cls="notice notice-info", role="status")
+        return layout(
+            "내 주제 수정 (Edit My Topic)",
+            H1("내 주제 수정 (Edit My Topic)"),
+            gate, resolve,
+            Script(_MANAGE_LOGIN_JS),
+            active="/manage",
+        )
+
+    @app.post("/manage/open")
+    def manage_open(email: str = ""):
+        email = (email or "").strip()
+        if not email:
+            return RedirectResponse(PYCON_SIGNIN_URL, status_code=303)
+        with get_session() as session:
+            topics = _topics_for_email(session, email)
+            if not topics:
+                return layout(
+                    "내 주제 수정 (Edit My Topic)",
+                    H1("내 주제 수정 (Edit My Topic)"),
+                    notice(f"'{email}' 으로 등록된 주제가 없습니다. "
+                           "(No topics found for this email.)"),
+                    A("주제 등록하기 (Submit a topic)", href="/topics/new", cls="btn"),
+                    active="/manage",
+                )
+            if len(topics) == 1:
+                raw = _issue_token(session, topics[0])
+                return RedirectResponse(f"/manage/{raw}?sent=1", status_code=303)
+            # 여러 개면 어떤 주제를 수정할지 고른다 (multiple → choose one).
+            choices = [
+                Form(
+                    Input(type="hidden", name="email", value=email),
+                    Input(type="hidden", name="topic_id", value=str(t.id)),
+                    Button(t.title, type="submit", cls="btn secondary"),
+                    method="post", action="/manage/open-one", cls="manage-pick",
+                ) for t in topics
+            ]
+            return layout(
+                "내 주제 수정 (Edit My Topic)",
+                H1("어떤 주제를 수정할까요? (Which topic?)"),
+                notice(f"{email} 으로 등록된 주제 {len(topics)}개입니다. 하나를 고르세요."),
+                *choices,
+                active="/manage",
+            )
+
+    @app.post("/manage/open-one")
+    def manage_open_one(topic_id: int = 0, email: str = ""):
+        email = (email or "").strip().lower()
+        with get_session() as session:
+            topic = session.get(Topic, topic_id)
+            if (topic and topic.deleted_at is None
+                    and (topic.host_email or "").strip().lower() == email):
+                raw = _issue_token(session, topic)
+                return RedirectResponse(f"/manage/{raw}?sent=1", status_code=303)
+        return RedirectResponse("/manage", status_code=303)
+
     @app.get("/manage/{token}")
-    def manage(token: str):
+    def manage(token: str, sent: str = ""):
         with get_session() as session:
             topic = _load_topic(session, token)
             if not topic:
@@ -203,7 +377,12 @@ def register(app) -> None:
                     A("홈으로 (Home)", href="/", cls="btn secondary"),
                 )
             topic._raw_token = token
-            return layout("내 주제 관리 (Manage My Topic)", _panel(session, topic))
+            # 로그인으로 진입했을 때: 매직링크도 메일로 보냈다고 한 번 안내
+            msg = notice("관리용 매직링크를 이메일로도 보냈어요. 다음엔 메일의 링크로 "
+                         "바로 들어올 수 있어요. (We also emailed you the magic link.)",
+                         kind="success") if sent else None
+            return layout("내 주제 관리 (Manage My Topic)",
+                          _panel(session, topic, msg=msg))
 
     @app.post("/manage/{token}/edit")
     async def manage_edit(token: str, title: str, description: str = "",

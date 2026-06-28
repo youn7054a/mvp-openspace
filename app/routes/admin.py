@@ -1,7 +1,7 @@
 """관리자 페이지 (Admin): /admin, /admin/topics, /admin/rooms, /admin/timeslots."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, time as dtime, timedelta
 
 from fasthtml.common import (
     A,
@@ -22,6 +22,7 @@ from fasthtml.common import (
     Small,
     Span,
     Table,
+    Tbody,
     Td,
     Th,
     Thead,
@@ -34,7 +35,13 @@ from sqlmodel import select
 from ..components import field, layout, notice
 from ..database import get_session
 from ..models import Room, ScheduleEntry, Timeslot, Topic, utcnow
-from ..queries import all_rooms, all_timeslots, entry_for_topic, schedule_map
+from ..queries import (
+    all_rooms,
+    all_timeslots,
+    entry_for_topic,
+    schedule_map,
+    topics_by_id,
+)
 from ..security import (
     ADMIN_SESSION_KEY,
     is_admin,
@@ -44,6 +51,7 @@ from ..security import (
 
 def _admin_layout(title, *content):
     nav = Section(
+        A("타임테이블 (Timetable)", href="/admin/timetable", cls="nav-link"), " · ",
         A("주제 (Topics)", href="/admin/topics", cls="nav-link"), " · ",
         A("룸 (Rooms)", href="/admin/rooms", cls="nav-link"), " · ",
         A("타임슬롯 (Timeslots)", href="/admin/timeslots", cls="nav-link"), " · ",
@@ -68,6 +76,104 @@ def _ts_error(message: str):
         notice(message, kind="error"),
         A("돌아가기 (Back)", href="/admin/timeslots", cls="btn secondary"),
     )
+
+
+def _tt_swap(*, target="#tt-builder"):
+    """빌더 HTMX 스왑 공통 속성 (common swap attrs for builder buttons/forms)."""
+    return dict(hx_target=target, hx_swap="outerHTML")
+
+
+def _row_time_cell(ts):
+    """행(시간) 머리 — 시작·종료 인라인 편집 + 행 삭제."""
+    return Div(
+        Form(
+            Input(type="time", name="start_time", value=f"{ts.starts_at:%H:%M}",
+                  aria_label="시작 (Start)", cls="tt-time"),
+            Span("–", cls="tt-dash"),
+            Input(type="time", name="end_time", value=f"{ts.ends_at:%H:%M}",
+                  aria_label="종료 (End)", cls="tt-time"),
+            hx_post=f"/admin/timetable/slot/{ts.id}/time",
+            hx_trigger="change", cls="tt-time-form", **_tt_swap(),
+        ),
+        Button("✕", type="button", title="이 시간(행) 삭제 (Delete row)",
+               hx_post=f"/admin/timetable/slot/{ts.id}/remove",
+               hx_confirm="이 시간 행을 삭제할까요? (Delete this time row?)",
+               cls="tt-del", **_tt_swap()),
+        cls="tt-rowhead",
+    )
+
+
+def _room_head_cell(room):
+    """열(방) 머리 — 이름 인라인 편집 + 열 삭제."""
+    return Div(
+        Form(
+            Input(name="name", value=room.name, aria_label="방 이름 (Room name)",
+                  cls="tt-room-name"),
+            hx_post=f"/admin/timetable/room/{room.id}/rename",
+            hx_trigger="change", cls="tt-room-form", **_tt_swap(),
+        ),
+        Button("✕", type="button", title="이 방(열) 삭제 (Delete column)",
+               hx_post=f"/admin/timetable/room/{room.id}/remove",
+               hx_confirm="이 방(열)을 삭제할까요? (Delete this room column?)",
+               cls="tt-del", **_tt_swap()),
+        cls="tt-colhead",
+    )
+
+
+def _builder_partial(db):
+    """워드 표 방식 편집기 (Word-processor-style editable timetable).
+
+    행(시간) ＋는 아래로, 열(방) ＋는 옆으로 — 모든 열이 같은 시간 행을 공유한다.
+    HTMX 로 이 Div(#tt-builder) 전체를 통째로 다시 그린다.
+    """
+    rooms = all_rooms(db)
+    timeslots = all_timeslots(db)
+    slots = schedule_map(db)
+    topics = topics_by_id(db)
+
+    add_col = Button("＋", type="button", title="방(열) 추가 (Add room column)",
+                     hx_post="/admin/timetable/add-room",
+                     cls="tt-add tt-add-col", **_tt_swap())
+    header = Tr(
+        Th("시간 (Time)", cls="tt-corner"),
+        *[Th(_room_head_cell(r), cls="tt-col") for r in rooms],
+        Th(add_col, cls="tt-addcol-cell"),
+    )
+
+    body_rows = []
+    span = len(rooms) + 1  # 방 열들 + ＋열 (closed row spans these)
+    for ts in timeslots:
+        if ts.is_closed:
+            body_rows.append(Tr(
+                Th(_row_time_cell(ts), scope="row", cls="tt-row"),
+                Td(f"🔒 {ts.closed_label}", colspan=span, cls="slot-closed"),
+            ))
+            continue
+        cells = [Th(_row_time_cell(ts), scope="row", cls="tt-row")]
+        for r in rooms:
+            entry = slots.get((r.id, ts.id))
+            topic = topics.get(entry.topic_id) if entry else None
+            if topic and topic.is_active:
+                cells.append(Td(topic.title, cls="slot-filled"))
+            else:
+                cells.append(Td("비어있음 (open)", cls="slot-open"))
+        cells.append(Td("", cls="tt-addcol-cell"))  # ＋열 아래 빈 칸
+        body_rows.append(Tr(*cells))
+
+    add_row = Button("＋ 시간(행) 추가 (Add row)", type="button",
+                     hx_post="/admin/timetable/add-row",
+                     cls="tt-add tt-add-row", **_tt_swap())
+
+    children = [
+        Div(Table(Thead(header), Tbody(*body_rows), cls="tt-edit schedule"),
+            cls="schedule-scroll"),
+        Div(add_row, cls="tt-addrow"),
+    ]
+    if not timeslots and not rooms:
+        children.append(P("＋ 로 시간(행)과 방(열)을 추가해 표를 만드세요. "
+                          "(Build the table by adding rows and columns with ＋.)",
+                          cls="field-help"))
+    return Div(*children, id="tt-builder", cls="tt-builder")
 
 
 def _admin_sched_cell(topic, entry, rooms, open_ts, taken, room_by_id, ts_by_id):
@@ -364,6 +470,125 @@ def register(app) -> None:
                 db.add(topic)
                 db.commit()
         return RedirectResponse("/admin/topics", status_code=303)
+
+    # ---- 타임테이블 짜기 (Word-table builder: rows=time, cols=rooms) ----
+    @app.get("/admin/timetable")
+    def admin_timetable(session):
+        if (redir := _require_admin(session)):
+            return redir
+        with get_session() as db:
+            builder = _builder_partial(db)
+        return _admin_layout(
+            "타임테이블 짜기 (Timetable Builder)",
+            H2("타임테이블 (Timetable)"),
+            P("워드 표처럼 ＋로 시간(행)은 아래로, 방(열)은 옆으로 추가하세요. "
+              "시간·방 이름은 칸을 눌러 바로 수정하고, ✕로 삭제합니다. "
+              "(Add rows/columns with ＋, edit inline, delete with ✕.)",
+              cls="field-help"),
+            builder,
+        )
+
+    @app.post("/admin/timetable/add-row")
+    def tt_add_row(session):
+        """시간(행) 추가 — 직전 슬롯에 이어 같은 길이로 한 행 추가."""
+        if (redir := _require_admin(session)):
+            return redir
+        with get_session() as db:
+            # 룸을 따로 신경 안 써도 되게, 첫 행 추가 시 기본 방 1개 자동 생성
+            if not all_rooms(db):
+                db.add(Room(name="룸 1", sort_order=0))
+                db.commit()
+            existing = all_timeslots(db)
+            if existing:
+                last = existing[-1]  # 시간순 정렬이라 마지막이 가장 늦은 슬롯
+                duration = last.ends_at - last.starts_at
+                starts = last.ends_at
+                ends = starts + (duration or timedelta(minutes=45))
+            else:
+                base = datetime.combine(date.today(), dtime(10, 0))
+                starts, ends = base, base + timedelta(minutes=45)
+            order = max((t.sort_order for t in existing), default=-1) + 1
+            db.add(Timeslot(starts_at=starts, ends_at=ends, sort_order=order))
+            db.commit()
+            return _builder_partial(db)
+
+    @app.post("/admin/timetable/add-room")
+    def tt_add_room(session):
+        """방(열) 추가 — 기본 이름 '룸 N'."""
+        if (redir := _require_admin(session)):
+            return redir
+        with get_session() as db:
+            rooms = all_rooms(db)
+            order = max((r.sort_order for r in rooms), default=-1) + 1
+            db.add(Room(name=f"룸 {len(rooms) + 1}", sort_order=order))
+            db.commit()
+            return _builder_partial(db)
+
+    @app.post("/admin/timetable/slot/{slot_id}/time")
+    def tt_slot_time(session, slot_id: int, start_time: str = "", end_time: str = ""):
+        """행(시간) 인라인 수정 — 날짜는 유지, 시각만 갱신."""
+        if (redir := _require_admin(session)):
+            return redir
+        with get_session() as db:
+            ts = db.get(Timeslot, slot_id)
+            if ts:
+                try:
+                    d = ts.starts_at.date()
+                    s = datetime.combine(d, dtime.fromisoformat(start_time))
+                    e = datetime.combine(d, dtime.fromisoformat(end_time))
+                    if e > s:
+                        ts.starts_at, ts.ends_at = s, e
+                        ts.updated_at = utcnow()
+                        db.add(ts)
+                        db.commit()
+                except (ValueError, TypeError):
+                    pass  # 잘못된 입력은 무시하고 기존 값 유지
+            return _builder_partial(db)
+
+    @app.post("/admin/timetable/room/{room_id}/rename")
+    def tt_room_rename(session, room_id: int, name: str = ""):
+        """열(방) 이름 인라인 수정."""
+        if (redir := _require_admin(session)):
+            return redir
+        name = (name or "").strip()
+        with get_session() as db:
+            room = db.get(Room, room_id)
+            if room and name:
+                room.name = name
+                room.updated_at = utcnow()
+                db.add(room)
+                db.commit()
+            return _builder_partial(db)
+
+    @app.post("/admin/timetable/slot/{slot_id}/remove")
+    def tt_slot_remove(session, slot_id: int):
+        """행(시간) 삭제 — 해당 슬롯의 배정도 함께 제거."""
+        if (redir := _require_admin(session)):
+            return redir
+        with get_session() as db:
+            for e in db.exec(select(ScheduleEntry).where(
+                    ScheduleEntry.timeslot_id == slot_id)):
+                db.delete(e)
+            ts = db.get(Timeslot, slot_id)
+            if ts:
+                db.delete(ts)
+            db.commit()
+            return _builder_partial(db)
+
+    @app.post("/admin/timetable/room/{room_id}/remove")
+    def tt_room_remove(session, room_id: int):
+        """열(방) 삭제 — 해당 방의 배정도 함께 제거."""
+        if (redir := _require_admin(session)):
+            return redir
+        with get_session() as db:
+            for e in db.exec(select(ScheduleEntry).where(
+                    ScheduleEntry.room_id == room_id)):
+                db.delete(e)
+            room = db.get(Room, room_id)
+            if room:
+                db.delete(room)
+            db.commit()
+            return _builder_partial(db)
 
     # ---- 룸 관리 (Room management) ----
     @app.get("/admin/rooms")

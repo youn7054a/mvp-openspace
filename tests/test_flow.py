@@ -142,8 +142,10 @@ def test_close_slot_with_custom_label_frees_schedule(client, admin_client, captu
     assert ts.is_closed is True and ts.label == "키노트"
     assert entries == []
 
-    # 닫힌 슬롯은 예약 옵션에 없고, 타임테이블엔 라벨 표시
-    assert "Room A · 10:00–10:45" not in client.get(f"/manage/{token}").text
+    # 닫힌 슬롯은 예약 불가(빈 칸 버튼 없음)이고, 관리 표엔 라벨 표시
+    manage_html = client.get(f"/manage/{token}").text
+    assert "이 자리 잡기" not in manage_html and "여기로 이동" not in manage_html
+    assert "키노트" in manage_html
     assert "키노트" in client.get("/schedule").text
 
     # 라벨 없이 닫으면 기본 라벨 (close without label -> default)
@@ -156,7 +158,9 @@ def test_close_slot_with_custom_label_frees_schedule(client, admin_client, captu
     with get_session() as db:
         ts = db.get(Timeslot, ts_id)
     assert ts.is_closed is False and ts.label == ""
-    assert "Room A · 10:00–10:45" in client.get(f"/manage/{token}").text
+    # 다시 열면 빈 칸을 눌러 예약 가능 (open cell becomes bookable again)
+    reopened = client.get(f"/manage/{token}").text
+    assert "이 자리 잡기" in reopened and "10:00–10:45" in reopened
 
 
 def test_topic_submission_and_magic_link(client, captured_tokens):
@@ -281,6 +285,188 @@ def test_board_date_selector(client, admin_client):
     d13 = client.get("/board?date=2026-09-13").text
     assert "14:00–14:45" in d13
     assert "10:00–10:45" not in d13
+
+
+def test_manage_interactive_grid_register(client, admin_client, captured_tokens):
+    # 내 주제 관리: 표의 빈 칸을 눌러(=schedule POST) 등록되는 흐름
+    room_id, ts_id = _seed_room_and_slot(admin_client)
+    token = _submit_topic(client, captured_tokens)
+
+    page = client.get(f"/manage/{token}").text
+    assert "Room A" in page and "10:00–10:45" in page  # 표에 룸/시간 노출
+    assert "이 자리 잡기" in page                        # 빈 칸 등록 버튼
+
+    # 빈 칸 버튼이 호출하는 엔드포인트로 등록 (button posts slot=room:ts)
+    r = client.post(f"/manage/{token}/schedule",
+                    data={"slot": f"{room_id}:{ts_id}"})
+    assert "타임테이블에 등록되었습니다" in r.text
+    assert "✓ 내 주제" in r.text and "여기로 이동" not in r.text  # 내 자리 표시, 다른 빈칸 없음
+
+
+def test_manage_multiday_date_tabs(client, admin_client, captured_tokens):
+    # 행사가 여러 날이면 관리 표에도 날짜 탭이 노출된다
+    admin_client.post("/admin/rooms", data={"name": "Room A", "sort_order": "0"})
+    admin_client.post("/admin/timeslots", data={
+        "date": "2026-09-12", "start_time": "10:00",
+        "slot_minutes": "45", "break_minutes": "0", "count": "1"})
+    admin_client.post("/admin/timeslots", data={
+        "date": "2026-09-13", "start_time": "14:00",
+        "slot_minutes": "45", "break_minutes": "0", "count": "1"})
+    token = _submit_topic(client, captured_tokens)
+
+    page = client.get(f"/manage/{token}").text
+    assert "date-tabs" in page                         # 날짜 탭 영역 존재
+    assert "09.12" in page and "09.13" in page         # 두 날짜 탭
+    assert "10:00–10:45" in page and "14:00–14:45" in page  # 두 날 슬롯 모두 렌더
+    # 각 표 위에 어떤 날 표인지 날짜 제목 캡션 표시
+    assert "2026년 9월 12일" in page and "2026년 9월 13일" in page
+    assert "타임테이블" in page
+
+
+def test_tt_add_row_creates_default_room_and_slot(admin_client):
+    # 워드 표 빌더: 첫 '시간(행) 추가' 시 기본 방 1개 + 슬롯 1개 자동 생성
+    r = admin_client.post("/admin/timetable/add-row")
+    assert r.status_code == 200 and "tt-builder" in r.text
+    with get_session() as db:
+        rooms = list(db.exec(select(Room)))
+        tss = list(db.exec(select(Timeslot)))
+    assert [x.name for x in rooms] == ["룸 1"]
+    assert len(tss) == 1
+    assert tss[0].starts_at.strftime("%H:%M") == "10:00"
+    assert tss[0].ends_at.strftime("%H:%M") == "10:45"
+
+
+def test_tt_add_room_and_row_continuation(admin_client):
+    # 옆 ＋는 방(열) 추가, 아래 ＋ 행은 직전 슬롯에 이어 같은 길이로 연속 생성
+    admin_client.post("/admin/timetable/add-row")     # 룸1 + 10:00–10:45
+    admin_client.post("/admin/timetable/add-room")    # 룸2 추가
+    admin_client.post("/admin/timetable/add-row")     # 10:45–11:30
+    with get_session() as db:
+        rooms = [r.name for r in db.exec(select(Room))]
+        tss = sorted(db.exec(select(Timeslot)), key=lambda t: t.starts_at)
+    assert rooms == ["룸 1", "룸 2"]
+    assert [f"{t.starts_at:%H:%M}-{t.ends_at:%H:%M}" for t in tss] == \
+        ["10:00-10:45", "10:45-11:30"]
+
+
+def test_tt_edit_time_and_rename_room(admin_client):
+    admin_client.post("/admin/timetable/add-row")
+    with get_session() as db:
+        sid = db.exec(select(Timeslot)).first().id
+        rid = db.exec(select(Room)).first().id
+    admin_client.post(f"/admin/timetable/slot/{sid}/time",
+                      data={"start_time": "09:30", "end_time": "10:15"})
+    admin_client.post(f"/admin/timetable/room/{rid}/rename",
+                      data={"name": "메인홀"})
+    with get_session() as db:
+        ts = db.get(Timeslot, sid)
+        assert f"{ts.starts_at:%H:%M}-{ts.ends_at:%H:%M}" == "09:30-10:15"
+        assert db.get(Room, rid).name == "메인홀"
+    # 잘못된 시간(종료 ≤ 시작)은 무시되고 기존 값 유지
+    admin_client.post(f"/admin/timetable/slot/{sid}/time",
+                      data={"start_time": "11:00", "end_time": "10:00"})
+    with get_session() as db:
+        ts = db.get(Timeslot, sid)
+        assert f"{ts.starts_at:%H:%M}-{ts.ends_at:%H:%M}" == "09:30-10:15"
+
+
+def test_tt_delete_row_and_column(admin_client):
+    admin_client.post("/admin/timetable/add-row")    # 룸1 + slot
+    admin_client.post("/admin/timetable/add-room")   # 룸2
+    with get_session() as db:
+        sid = db.exec(select(Timeslot)).first().id
+        rid2 = sorted(db.exec(select(Room)), key=lambda r: r.id)[-1].id
+    admin_client.post(f"/admin/timetable/room/{rid2}/remove")
+    admin_client.post(f"/admin/timetable/slot/{sid}/remove")
+    with get_session() as db:
+        assert len(list(db.exec(select(Room)))) == 1
+        assert list(db.exec(select(Timeslot))) == []
+
+
+def test_schedule_multiday_date_tabs(client, admin_client):
+    # 공개 타임테이블도 여러 날이면 날짜 탭 + 날짜 캡션으로 나눠 보여준다
+    admin_client.post("/admin/rooms", data={"name": "Room A", "sort_order": "0"})
+    admin_client.post("/admin/timeslots", data={
+        "date": "2026-09-12", "start_time": "10:00",
+        "slot_minutes": "45", "break_minutes": "0", "count": "1"})
+    admin_client.post("/admin/timeslots", data={
+        "date": "2026-09-13", "start_time": "14:00",
+        "slot_minutes": "45", "break_minutes": "0", "count": "1"})
+
+    page = client.get("/schedule").text
+    assert "date-tabs" in page                         # 날짜 탭 영역
+    assert "09.12" in page and "09.13" in page          # 두 날짜 탭
+    assert "2026년 9월 12일" in page and "2026년 9월 13일" in page  # 날짜 캡션
+    assert "10:00–10:45" in page and "14:00–14:45" in page  # 두 날 표 모두 렌더
+
+
+def test_nav_shows_participant_items_only(client):
+    # 공개 네비: 주제 등록·목록·내 주제 수정·타임테이블만, 전광판은 빠짐
+    nav = client.get("/topics/new").text
+    for label in ["주제 등록", "주제 목록", "내 주제 수정", "타임테이블"]:
+        assert label in nav
+    assert "전광판 (Display Board)" not in nav
+
+
+def _submit(client, *, email, title):
+    r = client.post("/topics/new", data={
+        "host_email": email, "title": title, "description": "d"})
+    assert r.status_code == 200
+
+
+def test_manage_login_single_topic_reissues_token(client):
+    # 로그인 이메일로 본인 주제 1개 → 새 토큰으로 관리 페이지 직행
+    _submit(client, email="me@x.com", title="내 발표")
+    r = client.post("/manage/open", data={"email": "me@x.com"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    loc = r.headers["location"]
+    assert loc.startswith("/manage/")
+    panel = client.get(loc).text
+    assert "내 주제 관리" in panel and "내 발표" in panel
+
+
+def test_manage_login_also_emails_magic_link(client, monkeypatch):
+    # 로그인 진입 시 직접 수정 + 매직링크 이메일 동시 발송, 안내 노출
+    sent = []
+    monkeypatch.setattr("app.routes.manage.send_magic_link",
+                        lambda to, token, title: sent.append((to, token)))
+    _submit(client, email="me@x.com", title="내 발표")
+    r = client.post("/manage/open", data={"email": "me@x.com"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    assert sent and sent[0][0] == "me@x.com"          # 메일 발송됨
+    assert "이메일로도 보냈" in client.get(r.headers["location"]).text
+
+
+def test_manage_login_multiple_topics_choose(client):
+    # 같은 이메일(대소문자 무시) 주제 2개 → 선택 페이지, 고르면 진입
+    _submit(client, email="me@x.com", title="주제 하나")
+    _submit(client, email="ME@x.com", title="주제 둘")
+    r = client.post("/manage/open", data={"email": "me@x.com"})
+    assert "어떤 주제" in r.text and "주제 하나" in r.text and "주제 둘" in r.text
+    with get_session() as db:
+        tid = [t.id for t in db.exec(select(Topic))
+               if t.host_email.lower() == "me@x.com"][0]
+    r = client.post("/manage/open-one",
+                    data={"email": "me@x.com", "topic_id": str(tid)})
+    assert "내 주제 관리" in r.text
+
+
+def test_manage_open_one_rejects_email_mismatch(client):
+    # 다른 사람 이메일 주제는 열 수 없다 (소유권 보호)
+    _submit(client, email="other@x.com", title="남의 주제")
+    with get_session() as db:
+        other_id = db.exec(select(Topic)).first().id
+    r = client.post("/manage/open-one",
+                    data={"email": "me@x.com", "topic_id": str(other_id)},
+                    follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/manage"
+
+
+def test_manage_open_no_match_shows_notice(client):
+    r = client.post("/manage/open", data={"email": "nobody@x.com"})
+    assert "등록된 주제가 없습니다" in r.text
 
 
 def test_board_renders(client):

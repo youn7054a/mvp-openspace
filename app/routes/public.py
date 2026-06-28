@@ -1,8 +1,6 @@
 """공개 페이지 (Public pages): /, /topics, /topics/new, /schedule, /board."""
 from __future__ import annotations
 
-from datetime import date
-
 from fasthtml.common import (
     A,
     Article,
@@ -21,15 +19,20 @@ from fasthtml.common import (
     Script,
     Section,
     Span,
-    Table,
-    Td,
-    Th,
-    Thead,
-    Tr,
 )
 from starlette.datastructures import UploadFile
 
-from ..components import field, layout, notice, topic_card
+from ..components import (
+    PYCON_SESSION_URL,
+    PYCON_SIGNIN_URL,
+    date_tabs,
+    field,
+    fmt_day_short,
+    layout,
+    notice,
+    schedule_table,
+    topic_card,
+)
 from ..database import get_session
 from ..mailer import send_magic_link
 from ..models import Topic
@@ -95,6 +98,52 @@ _LIVE_PREVIEW_JS = """
   syncText();
 })();
 """
+
+
+# PyCon 로그인으로 주제 등록을 보호한다 (Gate topic submission behind PyCon login).
+# - allauth headless 세션 엔드포인트: 인증 시 data.user.email 제공.
+# - 쿠키가 필요하므로 브라우저에서 credentials:'include' 로 호출한다.
+# - 미로그인(확정) 시 PyCon 로그인 페이지로 보낸다.
+# - PyCon 장애/네트워크 오류 시에는 막지 않고 수동 입력 폼을 노출한다(폴백).
+_PYCON_GATE_JS = """
+(function () {
+  var EP = '%s';
+  var SIGNIN = '%s';
+  var input = document.getElementById('f-host_email');
+  var status = document.getElementById('pycon-status');
+  var gate = document.getElementById('pycon-gate');
+  var grid = document.getElementById('new-grid');
+  var done = false;
+  function reveal() {
+    if (gate) gate.hidden = true;
+    if (grid) grid.hidden = false;
+  }
+  // 외부 응답이 늦어도 폼이 영영 안 뜨는 일이 없게 안전망 (reveal fallback).
+  var timer = setTimeout(function () {
+    if (done) return; done = true; reveal();
+  }, 5000);
+  fetch(EP, { credentials: 'include', headers: { 'Accept': 'application/json' } })
+    .then(function (res) { return res.json(); })
+    .then(function (body) {
+      if (done) return; done = true; clearTimeout(timer);
+      var authed = body && body.meta && body.meta.is_authenticated;
+      if (!authed) { window.location.replace(SIGNIN); return; }  // 로그인 요구
+      var user = body.data && body.data.user;
+      var email = user && user.email;
+      if (email && input && !input.value.trim()) input.value = email;
+      if (email && status) {
+        status.textContent =
+          'PyCon 계정 이메일을 불러왔어요 (' + email + '). (Filled from your PyCon login.)';
+        status.hidden = false;
+      }
+      reveal();
+    })
+    .catch(function () {
+      // 비로그인이 아니라 장애/네트워크 오류 — 막지 않고 수동 입력 허용.
+      if (done) return; done = true; clearTimeout(timer); reveal();
+    });
+})();
+""" % (PYCON_SESSION_URL, PYCON_SIGNIN_URL)
 
 
 def _new_error(message: str):
@@ -195,6 +244,7 @@ def register(app) -> None:
         form = Form(
             field("이메일 (Email)", "host_email", input_type="email",
                   placeholder="you@example.com"),
+            P(id="pycon-status", cls="field-help pycon-status", hidden=True),
             field("별명 (Nickname)", "host_name", required=False,
                   placeholder="비워두면 익명으로 표시돼요 (optional)"),
             field("주제 제목 (Topic Title)", "title",
@@ -229,11 +279,18 @@ def register(app) -> None:
             ),
             cls="pin-preview", aria_hidden="true",
         )
+        gate = Div(
+            P("PyCon 로그인 확인 중… (Checking your PyCon login…)"),
+            id="pycon-gate", cls="notice notice-info", role="status",
+        )
         return layout(
             "주제 등록 (Submit Topic)",
             hero,
-            Div(Section(form, cls="form-col"), preview, cls="new-grid"),
+            gate,
+            Div(Section(form, cls="form-col"), preview,
+                cls="new-grid", id="new-grid", hidden=True),
             Script(_LIVE_PREVIEW_JS),
+            Script(_PYCON_GATE_JS),
             active="/topics/new", main_cls="content page-new",
         )
 
@@ -288,10 +345,22 @@ def register(app) -> None:
             timeslots = all_timeslots(session)
             slots = schedule_map(session)
             topics = topics_by_id(session)
+        if not rooms or not timeslots:
+            body = schedule_table(rooms, timeslots, slots, topics)  # 안내 노출
+        else:
+            # 여러 날이면 날짜 탭으로 나눠 보여준다 (split by day with date tabs).
+            days = sorted({t.starts_at.date().isoformat() for t in timeslots})
+
+            def render_day(day: str):
+                day_ts = [t for t in timeslots
+                          if t.starts_at.date().isoformat() == day]
+                return schedule_table(rooms, day_ts, slots, topics)
+
+            body = date_tabs(days, render_day, id_prefix="sday")
         return layout(
             "타임테이블 (Timetable)",
             H1("타임테이블 (Timetable)"),
-            _schedule_table(rooms, timeslots, slots, topics),
+            body,
         )
 
     @app.get("/board")
@@ -337,7 +406,7 @@ def register(app) -> None:
         head_children = [H1("전광판 (Display Board)", cls="board-title")]
         if len(day_strs) > 1:
             head_children.append(Div(*[
-                A(_fmt_day(d), href=f"/board?date={d}",
+                A(fmt_day_short(d), href=f"/board?date={d}",
                   cls="board-date" + (" is-active" if d == selected else ""))
                 for d in day_strs
             ], cls="board-dates"))
@@ -350,43 +419,6 @@ def register(app) -> None:
                         cls="board-empty")
         return layout("전광판 (Display Board)", head, content,
                       auto_refresh=45, chrome=False)
-
-
-def _schedule_table(rooms, timeslots, slots, topics):
-    if not rooms or not timeslots:
-        return notice(
-            "아직 룸/타임슬롯이 없습니다. 관리자가 먼저 등록해야 합니다. "
-            "(No rooms/timeslots yet — admin must add them.)"
-        )
-    header = Tr(Th("시간 / 룸 (Time / Room)"), *[Th(r.name) for r in rooms])
-    rows = []
-    for ts in timeslots:
-        if ts.is_closed:
-            # 닫힌 슬롯: 라벨을 전체 열에 표시 (closed slot spans all rooms)
-            rows.append(Tr(
-                Th(ts.time_label, scope="row"),
-                Td(ts.closed_label, colspan=len(rooms), cls="slot-closed"),
-            ))
-            continue
-        cells = [Th(ts.time_label, scope="row")]
-        for room in rooms:
-            entry = slots.get((room.id, ts.id))
-            topic = topics.get(entry.topic_id) if entry else None
-            if topic and topic.is_active:
-                cells.append(Td(topic.title, cls="slot-filled"))
-            else:
-                cells.append(Td("— 비어있음 (open)", cls="slot-open"))
-        rows.append(Tr(*cells))
-    return Table(Thead(header), *rows, cls="schedule")
-
-
-_WEEKDAYS_KO = ["월", "화", "수", "목", "금", "토", "일"]
-
-
-def _fmt_day(iso: str) -> str:
-    """ISO 날짜를 탭 라벨로 (e.g. 2026-09-12 -> 09.12 (금))."""
-    d = date.fromisoformat(iso)
-    return f"{d:%m.%d} ({_WEEKDAYS_KO[d.weekday()]})"
 
 
 def _board_card(room, topic):
