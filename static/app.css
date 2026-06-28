@@ -404,6 +404,10 @@ body.board .content {
   max-width: 100%; height: 100vh; padding: 2.2vh 2.4vw 2.6vh;
   display: flex; flex-direction: column; gap: 1vh;
 }
+/* HTMX 폴링 컨테이너 — head + board-body 를 담는 내부 플렉스 컬럼 */
+#board-live {
+  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 1vh;
+}
 .board-head {
   flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
   flex-wrap: wrap; gap: .6rem 1.2rem;
@@ -428,7 +432,7 @@ body.board .content {
 
 /* 타임슬롯 행들이 가중치대로 높이를 나눔 (세션 행은 높게, 빈 행은 낮게) */
 .board-slots {
-  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 1vh;
+  flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; flex-direction: column; gap: 1vh;
 }
 .board-section { min-height: 0; display: flex; flex-direction: column; }  /* flex 가중치는 인라인 */
 .board-section h2 {
@@ -450,12 +454,14 @@ body.board .content {
 }
 .board-session .room {
   flex: 0 0 auto; font-family: var(--font-mono); color: var(--accent);
-  font-size: clamp(.55rem, 1.2vh, .82rem);
+  font-size: clamp(.5rem, 1.05vh, .72rem);
 }
 .board-session .title {
-  font-family: var(--font-pixel); color: var(--foreground); line-height: 1.45;
+  /* 조밀한 본문 픽셀폰트 + 작은 크기로 좁은 카드에서도 제목이 다 보이게 */
+  font-family: var(--font-body); color: var(--foreground); line-height: 1.3;
   word-break: keep-all; overflow: hidden;
-  font-size: clamp(.85rem, 1.9vh, 1.4rem);
+  font-size: clamp(.6rem, 1.4vh, 1rem);
+  display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical;
 }
 /* 사진이 있는 세션: 배경 이미지 + 어두운 오버레이 (no extra height) */
 .board-session.has-image { background-size: cover; background-position: center; position: relative; }
@@ -472,8 +478,30 @@ body.board .content {
 .board-open-title { color: #6f6088 !important; font-family: var(--font-mono) !important; }
 /* 닫힌 슬롯 카드 (Keynote/break) */
 .board-closed { border-color: var(--accent); box-shadow: 0 0 16px var(--accent-soft); align-items: center; justify-content: center; text-align: center; }
-.board-closed .title { color: var(--accent); font-size: clamp(1.2rem, 3vh, 2.4rem); }
+.board-closed .title { color: var(--accent); font-size: clamp(1rem, 2.6vh, 2rem); line-height: 1.3; }
 .board-empty { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; font-size: 3vh; color: var(--ink-soft); }
+/* 전광판 본문: 타임테이블(왼쪽) + QR 사이드바(오른쪽) 가로 분할 */
+.board-body { flex: 1 1 auto; min-height: 0; display: flex; gap: 1.5vw; }
+/* QR 은 오른쪽 세로 사이드바로 노출 — 타임테이블 높이에 영향 없음 */
+.board-qr {
+  flex: 0 0 auto; display: flex; flex-direction: column;
+  justify-content: center; align-items: center; gap: 2.5vh;
+  width: clamp(9rem, 15vw, 15rem);
+}
+.board-qr-item { display: flex; flex-direction: column; align-items: center; gap: .8vh; max-width: 100%; }
+.board-qr-img {
+  width: clamp(7rem, 12vw, 12rem); height: auto; max-height: 34vh; object-fit: contain;
+  background: #fff; padding: .8vh; border-radius: 8px; border: 1px solid var(--border);
+}
+.board-qr-cap {
+  font-family: var(--font-mono); font-size: clamp(.7rem, 1.6vh, 1.05rem);
+  color: var(--foreground); text-align: center; line-height: 1.4;
+}
+
+/* 어드민 전광판 QR 등록 (Admin board-QR forms) */
+.qr-grid { display: flex; flex-wrap: wrap; gap: 1.5rem; }
+.qr-block { flex: 1 1 18rem; border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.2rem 1.2rem; background: var(--card); }
+.qr-block h2 { margin: .2rem 0 .8rem; }
 
 /* ---------- 반응형 (Responsive) ---------- */
 @media (max-width: 52rem) {

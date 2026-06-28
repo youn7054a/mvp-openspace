@@ -10,6 +10,7 @@ from fasthtml.common import (
     Form,
     H1,
     H2,
+    Img,
     Input,
     Label,
     Li,
@@ -32,12 +33,16 @@ from fasthtml.common import (
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
+from starlette.datastructures import UploadFile
+
 from ..components import field, layout, notice
 from ..database import get_session
-from ..models import Room, ScheduleEntry, Timeslot, Topic, utcnow
+from ..models import BoardQR, Room, ScheduleEntry, Timeslot, Topic, utcnow
 from ..queries import (
+    BOARD_QR_SLOTS,
     all_rooms,
     all_timeslots,
+    board_qrs,
     entry_for_topic,
     schedule_map,
     topics_by_id,
@@ -47,6 +52,12 @@ from ..security import (
     is_admin,
     verify_admin_password,
 )
+from ..uploads import (
+    UploadError,
+    delete_local_image,
+    normalize_image_url,
+    save_image,
+)
 
 
 def _admin_layout(title, *content):
@@ -55,6 +66,7 @@ def _admin_layout(title, *content):
         A("주제 (Topics)", href="/admin/topics", cls="nav-link"), " · ",
         A("룸 (Rooms)", href="/admin/rooms", cls="nav-link"), " · ",
         A("타임슬롯 (Timeslots)", href="/admin/timeslots", cls="nav-link"), " · ",
+        A("전광판 QR (Board QR)", href="/admin/board", cls="nav-link"), " · ",
         Form(Button("로그아웃 (Logout)", type="submit", cls="secondary"),
              method="post", action="/admin/logout", style="display:inline"),
         cls="admin-nav",
@@ -200,6 +212,41 @@ def _admin_sched_cell(topic, entry, rooms, open_ts, taken, room_by_id, ts_by_id)
                *opts, name="slot", aria_label="슬롯 (slot)"),
         Button("배정 (Assign)", type="submit"),
         method="post", action=f"/admin/topics/{topic.id}/schedule", cls="sched-cell",
+    )
+
+
+def _qr_form(slot: int, qr):
+    """전광판 QR 한 슬롯 등록 폼 (image upload/URL + caption)."""
+    img = qr.image_url if qr else None
+    caption = qr.caption if qr else ""
+    inner = []
+    if img:
+        inner.append(Div(
+            Img(src=img, alt=f"QR {slot} 이미지 (image)", cls="edit-thumb"),
+            Label(Input(type="checkbox", name="remove_image", value="1"),
+                  " 이미지 제거 (Remove image)", cls="checkbox-label"),
+            cls="current-image",
+        ))
+    else:
+        inner.append(Small("아직 등록된 QR 이미지가 없습니다. (No QR image yet.)",
+                           cls="field-help"))
+    inner += [
+        Div(Label("QR 이미지 업로드 (Upload)", fr=f"qr{slot}-file"),
+            Input(id=f"qr{slot}-file", name="image_file", type="file",
+                  accept="image/png,image/jpeg,image/gif,image/webp"), cls="field"),
+        Div(Label("또는 이미지 URL (or Image URL)", fr=f"qr{slot}-url"),
+            Input(id=f"qr{slot}-url", name="image_url", type="url", required=False,
+                  placeholder="https://example.com/qr.png"), cls="field"),
+        Div(Label("설명 (Caption)", fr=f"qr{slot}-caption"),
+            Input(id=f"qr{slot}-caption", name="caption", value=caption,
+                  placeholder="예: 행사 안내 / 설문 링크", required=False), cls="field"),
+        Button("저장 (Save)", type="submit"),
+    ]
+    return Section(
+        H2(f"QR {slot}"),
+        Form(*inner, method="post", action=f"/admin/board/qr/{slot}",
+             enctype="multipart/form-data", cls="qr-form"),
+        cls="qr-block",
     )
 
 
@@ -589,6 +636,57 @@ def register(app) -> None:
                 db.delete(room)
             db.commit()
             return _builder_partial(db)
+
+    # ---- 전광판 QR (Display-board QR codes) ----
+    @app.get("/admin/board")
+    def admin_board(session):
+        if (redir := _require_admin(session)):
+            return redir
+        with get_session() as db:
+            qrs = board_qrs(db)
+        return _admin_layout(
+            "전광판 QR (Board QR)",
+            H2("전광판 QR 코드 (Display-board QR)"),
+            P("전광판 하단에 노출할 QR 코드 2개를 등록합니다. 각 QR에 이미지와 설명을 "
+              "넣을 수 있어요. 이미지가 없는 QR은 전광판에 표시되지 않습니다. "
+              "(Register up to two QR codes shown at the bottom of the board.)",
+              cls="field-help"),
+            Div(*[_qr_form(s, qrs.get(s)) for s in BOARD_QR_SLOTS], cls="qr-grid"),
+        )
+
+    @app.post("/admin/board/qr/{slot}")
+    async def admin_board_qr_save(session, slot: int, caption: str = "",
+                                  image_url: str = "", remove_image: str = "",
+                                  image_file: UploadFile = None):
+        if (redir := _require_admin(session)):
+            return redir
+        if slot not in BOARD_QR_SLOTS:
+            return RedirectResponse("/admin/board", status_code=303)
+        # 이미지: 업로드 우선, 없으면 URL (uploaded file wins, else pasted URL)
+        try:
+            stored = await save_image(image_file)
+            new_url = stored or normalize_image_url(image_url)
+        except UploadError as exc:
+            return _admin_layout(
+                "전광판 QR (Board QR)", notice(str(exc), kind="error"),
+                A("돌아가기 (Back)", href="/admin/board", cls="btn secondary"))
+        with get_session() as db:
+            qr = db.exec(select(BoardQR).where(BoardQR.slot == slot)).first()
+            if not qr:
+                qr = BoardQR(slot=slot)
+            old_url = qr.image_url
+            if new_url:                      # 새 이미지로 교체
+                qr.image_url = new_url
+                if old_url and old_url != new_url:
+                    delete_local_image(old_url)
+            elif remove_image:               # 이미지 제거
+                qr.image_url = None
+                delete_local_image(old_url)
+            qr.caption = (caption or "").strip()
+            qr.updated_at = utcnow()
+            db.add(qr)
+            db.commit()
+        return RedirectResponse("/admin/board", status_code=303)
 
     # ---- 룸 관리 (Room management) ----
     @app.get("/admin/rooms")

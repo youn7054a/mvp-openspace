@@ -81,6 +81,25 @@ class Timeslot(SQLModel, table=True):
         return self.label.strip() or "닫힘 (Closed)"
 
 
+class BoardQR(SQLModel, table=True):
+    """전광판 QR 코드 (Display-board QR) — 슬롯별 이미지 + 설명.
+
+    행사 안내·설문·후원 링크 등을 전광판에 QR 로 노출한다(슬롯 1, 2 두 자리).
+    """
+
+    __table_args__ = (
+        # 슬롯당 1개 (one row per slot)
+        UniqueConstraint("slot", name="uq_boardqr_slot"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    slot: int = Field(index=True)  # 1 또는 2
+    image_url: Optional[str] = Field(default=None)  # QR 이미지 (업로드 또는 URL)
+    caption: str = Field(default="")  # QR 설명 (예: 행사 안내, 설문)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class ScheduleEntry(SQLModel, table=True):
     """타임테이블 배정 (Schedule entry) — 주제·룸·슬롯 매핑."""
 

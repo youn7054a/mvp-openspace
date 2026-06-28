@@ -37,9 +37,11 @@ from ..database import get_session
 from ..mailer import send_magic_link
 from ..models import Topic
 from ..queries import (
+    BOARD_QR_SLOTS,
     active_topics,
     all_rooms,
     all_timeslots,
+    board_qrs,
     entry_for_topic,
     schedule_map,
     topics_by_id,
@@ -386,60 +388,89 @@ def register(app) -> None:
 
     @app.get("/board")
     def board(date: str = ""):
-        with get_session() as session:
-            rooms = {r.id: r for r in all_rooms(session)}
-            all_ts = all_timeslots(session)
-            slots = schedule_map(session)
-            topics = topics_by_id(session)
+        # 전체 페이지는 한 번만 로드 — 이후 board-live 가 스스로 폴링하여 갱신
+        return layout("전광판 (Display Board)", _board_live(date), chrome=False)
 
-        # 행사 일자 선택 (Pick which day to show on the board).
-        day_strs = sorted({t.starts_at.date().isoformat() for t in all_ts})
-        selected = date if date in day_strs else (day_strs[0] if day_strs else "")
-        timeslots = [t for t in all_ts if t.starts_at.date().isoformat() == selected]
+    @app.get("/board/live")
+    def board_live(date: str = ""):
+        # HTMX 폴링 대상 — board-live div 만 반환해 outerHTML 로 교체(깜빡임 없음)
+        return _board_live(date)
 
-        # 선택한 날의 타임테이블을 한 화면(스크롤 없음)에 카드로 채운다.
-        # 빈 슬롯도 모두 보여줘서(비어있음) 어떤 시간이 열려있는지 알 수 있게 한다.
-        sections = []
-        for ts in timeslots:
-            if ts.is_closed:
-                # 닫힌 슬롯(키노트·휴식 등)도 카드 한 장으로 표시
-                body = Div(Article(Div(ts.closed_label, cls="title"),
-                                   cls="board-session board-closed"), cls="board-grid")
-                weight = 1.4
-            else:
-                cards = []
-                has_session = False
-                for room_id, room in rooms.items():
-                    entry = slots.get((room_id, ts.id))
-                    topic = topics.get(entry.topic_id) if entry else None
-                    if topic and topic.is_active:
-                        cards.append(_board_card(room, topic))
-                        has_session = True
-                    else:
-                        cards.append(_board_empty_card(room))  # 빈 칸도 표시
-                body = Div(*cards, cls="board-grid")
-                # 세션이 있는 행은 높게(제목 다 보이게), 빈 행은 낮게 — 무스크롤 유지
-                weight = 2.6 if has_session else 1.0
-            sections.append(Section(H2(ts.time_label), body,
-                                    cls="board-section", style=f"flex:{weight}"))
 
-        # 날짜 탭 (Date tabs) — 여러 날일 때만 노출, ?date= 로 자동 새로고침에도 유지
-        head_children = [H1("전광판 (Display Board)", cls="board-title")]
-        if len(day_strs) > 1:
-            head_children.append(Div(*[
-                A(fmt_day_short(d), href=f"/board?date={d}",
-                  cls="board-date" + (" is-active" if d == selected else ""))
-                for d in day_strs
-            ], cls="board-dates"))
-        head = Div(*head_children, cls="board-head")
+def _board_live(date: str):
+    """전광판 본문(자가 폴링 컨테이너) — 45초마다 HTMX 로 부드럽게 갱신.
 
-        if sections:
-            content = Div(*sections, cls="board-slots")
+    meta refresh(전체 리로드) 대신 이 div 만 outerHTML 로 교체하므로 깜빡임이 없다.
+    날짜(date)는 폴링 URL 에 실어 선택한 날이 유지되게 한다.
+    """
+    with get_session() as session:
+        rooms = {r.id: r for r in all_rooms(session)}
+        all_ts = all_timeslots(session)
+        slots = schedule_map(session)
+        topics = topics_by_id(session)
+        qrs = board_qrs(session)
+
+    # 행사 일자 선택 (Pick which day to show on the board).
+    day_strs = sorted({t.starts_at.date().isoformat() for t in all_ts})
+    selected = date if date in day_strs else (day_strs[0] if day_strs else "")
+    timeslots = [t for t in all_ts if t.starts_at.date().isoformat() == selected]
+
+    # 선택한 날의 타임테이블을 한 화면(스크롤 없음)에 카드로 채운다.
+    sections = []
+    for ts in timeslots:
+        if ts.is_closed:
+            # 닫힌 슬롯(키노트·휴식 등)도 카드 한 장으로 표시 — 세션 행과 비슷한 비중
+            body = Div(Article(Div(ts.closed_label, cls="title"),
+                               cls="board-session board-closed"), cls="board-grid")
+            weight = 2.2
         else:
-            content = P("아직 배정된 세션이 없습니다. (No sessions scheduled yet.)",
-                        cls="board-empty")
-        return layout("전광판 (Display Board)", head, content,
-                      auto_refresh=45, chrome=False)
+            cards = []
+            has_session = False
+            for room_id, room in rooms.items():
+                entry = slots.get((room_id, ts.id))
+                topic = topics.get(entry.topic_id) if entry else None
+                if topic and topic.is_active:
+                    cards.append(_board_card(room, topic))
+                    has_session = True
+                else:
+                    cards.append(_board_empty_card(room))  # 빈 칸도 표시
+            body = Div(*cards, cls="board-grid")
+            # 세션이 있는 행은 높게(제목 다 보이게), 빈 행은 낮게 — 무스크롤 유지
+            weight = 2.6 if has_session else 1.0
+        sections.append(Section(H2(ts.time_label), body,
+                                cls="board-section", style=f"flex:{weight}"))
+
+    # 날짜 탭 (Date tabs) — 여러 날일 때만 노출, ?date= 로 선택 유지
+    head_children = [H1("전광판 (Display Board)", cls="board-title")]
+    if len(day_strs) > 1:
+        head_children.append(Div(*[
+            A(fmt_day_short(d), href=f"/board?date={d}",
+              cls="board-date" + (" is-active" if d == selected else ""))
+            for d in day_strs
+        ], cls="board-dates"))
+    head = Div(*head_children, cls="board-head")
+
+    if sections:
+        content = Div(*sections, cls="board-slots")
+    else:
+        content = P("아직 배정된 세션이 없습니다. (No sessions scheduled yet.)",
+                    cls="board-empty")
+    # QR 은 오른쪽 사이드바로 분리 — 타임테이블 높이에 영향 주지 않음
+    body_children = [content]
+    qr_side = _board_qr_strip(qrs)
+    if qr_side is not None:
+        body_children.append(qr_side)
+    board_body = Div(*body_children, cls="board-body")
+
+    # 자가 폴링: 45초마다 자신을 outerHTML 로 교체 (전체 페이지 리로드 없음)
+    return Div(
+        head, board_body,
+        id="board-live",
+        hx_get=f"/board/live?date={selected}",
+        hx_trigger="every 45s",
+        hx_target="this",
+        hx_swap="outerHTML",
+    )
 
 
 def _board_card(room, topic):
@@ -469,3 +500,22 @@ def _board_empty_card(room):
         Div("비어있음 (open)", cls="title board-open-title"),
         cls="board-session board-open",
     )
+
+
+def _board_qr_strip(qrs):
+    """전광판 하단 QR 스트립 (Bottom QR strip) — 이미지가 등록된 QR만 표시.
+
+    이미지가 하나도 없으면 None 을 반환해 스트립 자체를 생략한다.
+    """
+    items = []
+    for slot in BOARD_QR_SLOTS:
+        qr = qrs.get(slot)
+        if not qr or not qr.image_url:
+            continue
+        children = [Img(src=qr.image_url, alt=f"QR {slot}", cls="board-qr-img")]
+        if qr.caption:
+            children.append(Div(qr.caption, cls="board-qr-cap"))
+        items.append(Div(*children, cls="board-qr-item"))
+    if not items:
+        return None
+    return Div(*items, cls="board-qr")

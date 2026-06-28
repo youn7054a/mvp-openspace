@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from sqlmodel import Session, select
 
-from .models import Room, ScheduleEntry, Timeslot, Topic
+from .models import BoardQR, Room, ScheduleEntry, Timeslot, Topic
+
+# 전광판 QR 슬롯 (Display-board QR slots) — 고정 2자리
+BOARD_QR_SLOTS = (1, 2)
 
 
 def active_topics(session: Session) -> list[Topic]:
@@ -41,3 +44,8 @@ def entry_for_topic(session: Session, topic_id: int) -> ScheduleEntry | None:
 
 def topics_by_id(session: Session) -> dict[int, Topic]:
     return {t.id: t for t in session.exec(select(Topic))}
+
+
+def board_qrs(session: Session) -> dict[int, BoardQR]:
+    """전광판 QR 슬롯 매핑 (slot -> BoardQR). 없는 슬롯은 누락."""
+    return {q.slot: q for q in session.exec(select(BoardQR))}

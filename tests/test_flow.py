@@ -4,7 +4,7 @@ from __future__ import annotations
 from sqlmodel import select
 
 from app.database import get_session
-from app.models import Room, Timeslot, Topic
+from app.models import BoardQR, Room, Timeslot, Topic
 
 
 def _submit_topic(client, captured_tokens, *, title="테스트 주제 (Test topic)",
@@ -469,6 +469,47 @@ def test_manage_open_no_match_shows_notice(client):
     assert "등록된 주제가 없습니다" in r.text
 
 
+def test_board_qr_set_and_shown(admin_client, client):
+    # 어드민에서 QR(이미지 URL + 설명) 등록 → 전광판 하단에 노출
+    admin_client.post("/admin/board/qr/1", data={
+        "image_url": "https://example.com/qr1.png", "caption": "행사 안내"})
+    with get_session() as db:
+        qr = db.exec(select(BoardQR).where(BoardQR.slot == 1)).first()
+    assert qr and qr.image_url == "https://example.com/qr1.png"
+    assert qr.caption == "행사 안내"
+    board = client.get("/board").text
+    assert "board-qr" in board
+    assert "https://example.com/qr1.png" in board and "행사 안내" in board
+
+
+def test_board_qr_hidden_without_image(admin_client, client):
+    # 설명만 있고 이미지가 없으면 전광판에 표시되지 않음
+    admin_client.post("/admin/board/qr/1", data={"caption": "이미지 없음"})
+    board = client.get("/board").text
+    assert "board-qr" not in board and "이미지 없음" not in board
+
+
+def test_board_qr_remove_image(admin_client, client):
+    admin_client.post("/admin/board/qr/2", data={
+        "image_url": "https://example.com/qr2.png", "caption": "설문"})
+    assert "https://example.com/qr2.png" in client.get("/board").text
+    # 이미지 제거 → 전광판에서 사라짐
+    admin_client.post("/admin/board/qr/2",
+                      data={"remove_image": "1", "caption": "설문"})
+    with get_session() as db:
+        assert db.exec(select(BoardQR).where(BoardQR.slot == 2)).first().image_url is None
+    assert "https://example.com/qr2.png" not in client.get("/board").text
+
+
+def test_board_qr_invalid_slot_ignored(admin_client):
+    r = admin_client.post("/admin/board/qr/9",
+                          data={"image_url": "https://example.com/x.png"},
+                          follow_redirects=False)
+    assert r.status_code == 303
+    with get_session() as db:
+        assert db.exec(select(BoardQR)).first() is None
+
+
 def test_board_renders(client):
     resp = client.get("/board")
     assert resp.status_code == 200
@@ -498,20 +539,31 @@ def test_seed_demo_data(client, admin_client):
     assert resp.status_code == 200
     assert "데모 데이터를 채웠습니다" in resp.text
     with get_session() as db:
-        assert len(list(db.exec(select(Room)))) == 5
-        assert len(list(db.exec(select(Timeslot)))) == 8
-        assert len(list(db.exec(select(Topic)))) == 15
-        assert len(list(db.exec(select(ScheduleEntry)))) == 10
-        assert any(t.is_closed for t in db.exec(select(Timeslot)))
+        rooms = list(db.exec(select(Room)))
+        slots = list(db.exec(select(Timeslot)))
+        entries = list(db.exec(select(ScheduleEntry)))
+        topics = list(db.exec(select(Topic)))
+        assert len(rooms) == 5
+        assert len(slots) == 8
+        assert any(s.is_closed for s in slots)
+        # 모든 열린 칸(열린 슬롯 × 룸)이 빠짐없이 채워진다
+        open_slots = [s for s in slots if not s.is_closed]
+        expected = len(open_slots) * len(rooms)
+        assert len(entries) == expected
+        assert len(topics) == expected
+        filled = {(e.room_id, e.timeslot_id) for e in entries}
+        for s in open_slots:
+            for r in rooms:
+                assert (r.id, s.id) in filled  # 빈 칸 없음
 
     # 공개 화면에 데모 데이터가 보임 (demo data visible publicly)
     assert "파이썬 타입 힌트" in client.get("/topics").text
     assert "키노트" in client.get("/schedule").text
 
-    # 전광판: 모든 타임슬롯을 표시 — 배정된 세션 + 빈 슬롯(비어있음) 모두 노출
+    # 전광판: 전 세션이 가득 차서 빈 슬롯(비어있음)이 없어야 함
     board = client.get("/board").text
     assert "파이썬 타입 힌트" in board       # 배정된 세션
-    assert "비어있음 (open)" in board         # 빈 슬롯도 보여야 함
+    assert "비어있음 (open)" not in board     # 빈 칸 없음 (모두 채워짐)
 
     # 다시 시드하면 교체(중복 없음) — 여전히 룸 5개 (re-seed replaces, no dupes)
     admin_client.post("/admin/seed")

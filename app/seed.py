@@ -62,8 +62,8 @@ def wipe_all(session: Session) -> None:
 def seed_demo(session: Session) -> dict[str, int]:
     """기존 데이터를 비우고 데모 데이터를 채운다 (wipe + seed).
 
-    룸 5개, 타임슬롯 8개(첫 칸은 키노트로 닫힘), 주제 15개를 만들고
-    10개를 타임테이블에 배정한다(나머지는 미배정으로 남김).
+    룸 5개, 타임슬롯 8개(첫 칸은 키노트로 닫힘)를 만들고, 열린 칸(룸×열린 슬롯)을
+    모두 채우도록 칸 수만큼 주제를 생성·배정한다(전 세션 가득 채움).
     """
     wipe_all(session)
 
@@ -93,9 +93,17 @@ def seed_demo(session: Session) -> dict[str, int]:
     for t in slots:
         session.refresh(t)
 
-    # 주제 (Topics)
+    # 열린 칸 (open cells) = 열린 슬롯 × 룸 — 이 칸들을 모두 채운다
+    open_slots = [t for t in slots if not t.is_closed]
+    open_pairs = [(r.id, ts.id) for ts in open_slots for r in rooms]
+
+    # 주제 (Topics): 칸 수만큼 생성. 템플릿을 순환하되 제목 중복은 번호로 구분.
     topics: list[Topic] = []
-    for i, (title, nick, desc, img) in enumerate(DEMO_TOPICS):
+    for i in range(len(open_pairs)):
+        title, nick, desc, img = DEMO_TOPICS[i % len(DEMO_TOPICS)]
+        repeat = i // len(DEMO_TOPICS)
+        if repeat:  # 두 바퀴째부터는 제목에 번호를 붙여 중복 방지
+            title = f"{title} ({repeat + 1})"
         _, token_hash = generate_token()
         topics.append(Topic(
             title=title, host_name=nick, host_email=f"demo{i}@example.com",
@@ -107,14 +115,11 @@ def seed_demo(session: Session) -> dict[str, int]:
     for t in topics:
         session.refresh(t)
 
-    # 배정 (Schedule): 열린 슬롯×룸 조합에 주제 10개 배정, 나머지는 미배정
-    open_slots = [t for t in slots if not t.is_closed]
-    pairs = [(r.id, ts.id) for ts in open_slots for r in rooms]
-    scheduled = 0
-    for topic, (room_id, ts_id) in zip(topics[:10], pairs):
+    # 배정 (Schedule): 모든 열린 칸을 빠짐없이 채운다 (every open cell filled)
+    for topic, (room_id, ts_id) in zip(topics, open_pairs):
         session.add(ScheduleEntry(topic_id=topic.id, room_id=room_id,
                                   timeslot_id=ts_id))
-        scheduled += 1
+    scheduled = len(open_pairs)
     session.commit()
 
     return {"rooms": len(rooms), "timeslots": len(slots),
