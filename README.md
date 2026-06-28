@@ -160,7 +160,8 @@ SQLite DB 와 업로드 이미지는 컨테이너의 `/data` 에 저장됩니다
 **재배포·재시작 때마다 데이터가 사라집니다.**
 
 - 서비스 → **Variables/Settings → Volumes → New Volume**
-- **Mount path** 를 `/data` 로 지정 (Dockerfile 의 `DATABASE_URL=/data/...`, `UPLOAD_DIR=/data/uploads` 와 일치)
+- **Mount path** 를 `/data` 로 지정
+- 아래 `DATABASE_URL`·`UPLOAD_DIR` 를 이 마운트 경로에 맞춰 **반드시 설정**해야 데이터가 볼륨에 저장됩니다
 
 **3) 환경 변수 설정**
 
@@ -173,9 +174,14 @@ SQLite DB 와 업로드 이미지는 컨테이너의 `/data` 에 저장됩니다
 | `BASE_URL` | `https://${{RAILWAY_PUBLIC_DOMAIN}}` ← 공개 도메인 참조 (매직링크에 사용) |
 | `ADMIN_PASSWORD` | 길고 랜덤한 값 |
 | `SESSION_SECRET` | `openssl rand -hex 32` 결과 |
+| `DATABASE_URL` | `sqlite:////data/openspace.db` (볼륨 경로 — **슬래시 4개 = 절대경로**) |
+| `UPLOAD_DIR` | `/data/uploads` (볼륨 경로) |
 
-> `DATABASE_URL`·`UPLOAD_DIR` 는 Dockerfile 에서 `/data` 로 이미 지정되어 있어 **건드리지 마세요**
-> (볼륨 마운트 경로와 일치해야 함).
+> ⚠️ `DATABASE_URL`·`UPLOAD_DIR` 는 **반드시 위 값으로 직접 설정**하세요. Dockerfile 의 해당
+> `ENV` 라인은 주석 처리돼 있어, 설정하지 않으면 기본값(`./openspace.db`, `./uploads`)으로
+> 컨테이너 내부에 저장돼 **재배포마다 데이터가 초기화**됩니다.
+> - SQLite **절대경로는 슬래시 4개**: `sqlite:////data/...` (3개는 상대경로로 해석됨).
+> - `.env` 는 로컬 전용(gitignore)이라 Railway 가 읽지 않습니다 — 모든 변수는 여기 **Variables** 에 넣으세요.
 
 **4) 공개 도메인 생성 & 접속**
 
@@ -187,6 +193,12 @@ SQLite DB 와 업로드 이미지는 컨테이너의 `/data` 에 저장됩니다
 > ⚠️ Railway 볼륨은 **단일 인스턴스** 기준입니다. SQLite는 단일 라이터라 잘 맞지만,
 > 수평 확장(레플리카)이 필요해지면 PostgreSQL 로 옮기세요(`DATABASE_URL` 만 교체).
 > TLS·HTTPS 는 Railway 도메인에서 자동 처리됩니다.
+
+> 🔑 **PyCon 로그인 연동을 쓰는 경우**: PyCon 세션 API는 CORS 로 **`*.pycon.kr` origin 만 허용**합니다.
+> 기본 Railway 도메인(`*.up.railway.app`)에서는 로그인 확인이 CORS 로 차단되니, 앱을
+> **`pycon.kr` 서브도메인**(예: `openspace.pycon.kr`)으로 서빙하세요 — Railway 커스텀 도메인 추가 +
+> PyCon DNS(CNAME) 연결. 그러면 코드 변경 없이 CORS 가 풀리고, 로그인 쿠키(`Domain=pycon.kr`)가
+> 공유돼 로그인 확인도 동작합니다. `BASE_URL` 도 그 주소로 설정하세요.
 
 운영 체크리스트:
 
