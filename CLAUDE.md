@@ -10,9 +10,9 @@ Open Space MVP
 
 Open Space MVP is a lightweight conference discussion scheduling platform.
 
-Participants propose discussion topics before the event and receive a private magic link.
+Participants log in with their PyCon identity and propose discussion topics before the event.
 
-Using the magic link, participants can:
+As the verified owner (PyCon member id) of a topic, participants can:
 
 - Edit their topic
 - Delete or cancel their topic
@@ -25,9 +25,10 @@ Attendees can:
 - View the final timetable
 - View a display-board mode during the event
 
-The platform intentionally avoids user accounts and conference login integration.
+The platform intentionally avoids its own user accounts and passwords.
 
-Ownership and permissions are handled entirely through email-based magic links.
+Ownership and permissions are handled through the PyCon member id, verified
+server-side from the existing PyCon login.
 
 ---
 
@@ -41,11 +42,11 @@ No account creation is required.
 
 ---
 
-## Ownership Through Magic Link
+## Ownership Through PyCon Identity
 
-A topic owner controls their topic through a secure email link.
+A topic owner is the PyCon account (member id) that created the topic.
 
-No login is required.
+Ownership is verified server-side from the PyCon session — no magic link, no email.
 
 ---
 
@@ -132,9 +133,8 @@ text 주제 등록 (Submit Topic)
 
 ## Step 2
 
-Participant submits:
+Participant submits (email/host_pycon_id come from the verified identity):
 
-- Email (required)
 - Nickname (optional — shown as 익명/Anonymous if blank)
 - Topic title
 - Description
@@ -146,9 +146,7 @@ Participant submits:
 
 System:
 
-- Creates topic
-- Generates secure magic link
-- Emails magic link
+- Creates topic owned by the participant's PyCon member id
 
 ---
 
@@ -196,19 +194,26 @@ during the event.
 
 ### /
 
-Home
+Home — 내 주제 대시보드 (My-topics dashboard). **Requires identity** (soft login).
+Lists the signed-in participant's own topics (keyed by PyCon member id; one person
+can have several) + a "주제 등록" button. No identity → a "PyCon 로그인 필요" page.
 
 ### /topics
 
-주제 목록 (Topic List)
+주제 목록 (Topic List) — public sticker wall.
 
 ### /topics/new
 
-주제 등록 (Submit Topic)
+주제 등록 (Submit Topic) — **requires identity**. No "주제 등록" eyebrow. Email and
+host_pycon_id come from the verified identity (not a form field); the participant
+fills nickname/title/description/image only.
 
 ### /schedule
 
-타임테이블 (Timetable)
+타임테이블 (Timetable) — public read-only. With `?topic={id}` (an owned topic) it
+becomes **interactive for that topic** (owner-only): click an open cell to register/
+move (POST `/schedule/{topic_id}/take`), cancel via `/schedule/{topic_id}/cancel`.
+The 2-day scheduling window applies (see Timetable Rule 3).
 
 ### /board
 
@@ -216,19 +221,20 @@ Home
 
 ---
 
-## Magic Link Pages
+## Owner Pages (identity)
 
-### /manage/{token}
+### /manage/{topic_id}
 
-내 주제 관리 (Manage My Topic)
+내 주제 관리 (Manage My Topic) — owner-only (identity == host_pycon_id, verified
+server-side). Old `/manage` redirects to `/my`.
 
 Functions:
 
-- Edit topic (incl. image: upload / URL / remove)
-- Delete topic
-- Register timetable
-- Change timetable
-- Cancel timetable registration
+- Edit topic (nickname/title/description, incl. image: upload / URL / remove) via
+  `/manage/{topic_id}/edit`
+- Delete topic via `/manage/{topic_id}/delete`
+- Shows the current timetable assignment + a "타임테이블에서 자리 잡기" link to
+  `/schedule?topic={topic_id}` (scheduling itself happens on the timetable view, not here)
 
 ---
 
@@ -274,11 +280,18 @@ text 0 or 1 topic
 
 Topic owners schedule their own topics.
 
+Self-scheduling opens **2 days before the event start** (= the earliest timeslot's
+date). Before that window, participant slot registration/moves are blocked and the
+manage timetable is shown read-only with an "opens on" notice. (See
+`is_scheduling_open` / `scheduling_opens_on` in `app/queries.py`,
+`SCHEDULING_LEAD_DAYS = 2`.)
+
 ---
 
 ## Rule 4
 
-Admin scheduling is optional but available (admin can assign/move topics).
+Admin scheduling is optional but available (admin can assign/move topics) — and is
+**not** restricted by the 2-day window; admins may assign anytime.
 
 ---
 
@@ -298,7 +311,11 @@ A closed slot (custom label, e.g. 키노트/휴식) accepts no topic.
 
 ## Topic
 
-text id title description host_name(nickname, optional) host_email image_url edit_token_hash edit_token_expires_at status is_hidden created_at updated_at deleted_at
+text id title description host_name(nickname, optional) host_email host_pycon_id(owner key) host_username image_url status is_hidden created_at updated_at deleted_at
+
+`host_pycon_id` (PyCon member id) is the stable ownership key; `host_email` is for
+contact/display only (may change). Adding this column to an existing
+SQLite DB needs a fresh DB or manual `ALTER TABLE` (create_all won't alter).
 
 ---
 
@@ -357,25 +374,25 @@ text PostgreSQL
 
 ## Email Provider
 
-Resend
+None (removed).
 
-Purpose:
-
-- Magic link delivery
+Ownership is established via PyCon identity (server-verified member id); no email is sent.
 
 ---
 
 ## Authentication
 
-No login.
+No accounts in this app; no passwords stored. Identity & ownership:
 
-No OAuth.
+1. **PyCon identity (soft login)** — server verifies the PyCon session cookie
+   server-to-server (only works on a pycon.kr subdomain) and uses the member id as
+   the ownership key. Required to submit/manage topics. `DEV_LOGIN_ENABLED` provides
+   a manual dev bypass. (See `app/auth.py`.)
+2. **Ownership** is by PyCon member id (`host_pycon_id`), verified server-side on
+   each owner action. No tokens, no email — there is nothing bearer to leak.
 
-No accounts.
-
-Only:
-
-text Magic Link Authentication
+No OAuth integration, no PyCon account creation here — identity is read from the
+existing PyCon login.
 
 ---
 
@@ -423,29 +440,39 @@ so the stylesheet can be swapped wholesale without touching templates.
 
 # Language Requirements
 
-All user-facing text must use:
+The product supports **Korean and English**, switchable via a header toggle
+(`KO | EN`). The selected language is stored in a `lang` cookie and applied to
+every page. (Default: Korean.)
 
-text Korean (English)
+Implementation (supersedes the original "no switcher / `Korean (English)` only"
+note — the owner requested a real toggle):
 
-format.
+- A tiny `t(ko, en)` helper in `app/i18n.py` returns one language at render time.
+  Korean and English live side-by-side at each call site, e.g.
+  `t("주제 등록", "Submit Topic")` — no separate message catalog, no i18n framework.
+- The request language is set per-request by a pure ASGI middleware
+  (`LangMiddleware` in `app/main.py`) that reads the `lang` cookie into a
+  `contextvar`. A plain ASGI middleware is required (not FastHTML `before` /
+  Starlette `BaseHTTPMiddleware`) so the contextvar propagates into sync route
+  handlers that Starlette runs in a threadpool.
+- The `/lang/{code}` route sets the cookie and redirects back (local paths only —
+  open-redirect guarded).
+- Inline JS strings, `hx_confirm`, and `confirm()` dialogs are localized by
+  injecting `t(...)` values at render time (see `_live_preview_js()`,
+  `pycon_prefill_js()` etc.).
 
-Examples:
-
-text 주제 등록 (Submit Topic) 주제 목록 (Topic List) 타임테이블 (Timetable) 전광판 (Display Board) 관리자 (Admin)
-
-No language switcher required.
-
-No i18n framework required.
+Code comments and docstrings stay in the original `한글 (English)` bilingual form
+(developer-facing — not user-facing, not localized).
 
 ---
 
 # Security Requirements
 
-## Magic Links
+## Ownership
 
-- Cryptographically secure token
-- Store hash only
-- Never store raw token
+- Owner = PyCon member id (`host_pycon_id`)
+- Verified server-side from the PyCon session on each owner action
+- No bearer tokens to leak (no magic links, no edit tokens)
 
 ---
 
@@ -470,11 +497,12 @@ Database constraints must prevent:
 
 ## Admin Protection
 
-Admin area protected by:
-
-text ADMIN_PASSWORD
-
-stored in environment variables.
+Admin access is by **identity email allowlist** — no password. A logged-in user
+whose PyCon email is in `ADMIN_EMAILS` (comma-separated env var) is an admin: the
+"관리자 (Admin)" nav tab appears and all `/admin/*` routes are unlocked. Non-admins
+(or anonymous) are redirected to `/`. (See `is_admin_email` in `app/auth.py`,
+`_require_admin` in `app/routes/admin.py`. No `/admin/login`; admin uses the same
+PyCon identity / dev login as everyone else.)
 
 MVP does not require user management.
 
@@ -482,9 +510,15 @@ MVP does not require user management.
 
 # Environment Variables
 
-text DATABASE_URL RESEND_API_KEY BASE_URL ADMIN_PASSWORD MAIL_FROM SESSION_SECRET UPLOAD_DIR
+text DATABASE_URL BASE_URL ADMIN_EMAILS SESSION_SECRET UPLOAD_DIR DEV_LOGIN_ENABLED
 
-See README.md for defaults and dev/prod deployment.
+`ADMIN_EMAILS` — comma-separated admin emails (case-insensitive); logging in with
+one grants admin. `DEV_LOGIN_ENABLED=1` enables `POST /dev/login` (manual identity for local dev/tests);
+leave unset in production (pycon.kr) where identity comes from server-verified PyCon
+
+`DEV_LOGIN_ENABLED=1` enables `POST /dev/login` (manual identity for local dev/tests);
+leave unset in production (pycon.kr) where identity comes from server-verified PyCon
+sessions. See README.md for defaults and dev/prod deployment.
 
 ---
 
@@ -535,16 +569,16 @@ Keyboard navigation must work.
 
 Do NOT implement:
 
-- Login
-- User accounts
+- Our own login / passwords (identity is read from the existing PyCon session — no app accounts)
+- User accounts (no account creation in this app)
 - OAuth
-- PyCon integration
+- PyCon feature integration beyond the read-only server-side session check (no PyCon write APIs, no profile sync)
 - Likes
 - Comments
 - Session attendance tracking
 - Speaker profiles
 - Realtime chat
-- Notifications beyond magic-link email
+- Email or any out-of-band notifications
 - GraphQL
 - Microservices
 - React
@@ -557,7 +591,7 @@ Do NOT implement:
 # MVP Completion Checklist
 
 - [x] Topic submission works (email/nickname/title/description/image)
-- [x] Magic link email works (Resend + console fallback)
+- [x] PyCon identity (server-verified) + soft login works
 - [x] Topic editing works (incl. image replace/remove)
 - [x] Topic deletion works
 - [x] Room management works
@@ -574,10 +608,10 @@ Do NOT implement:
 - [x] Demo data seeding works
 - [x] Mobile layout works
 - [x] Docker deployment configured
-- [x] No login required
+- [x] No app accounts/passwords (identity from PyCon login)
 - [x] Entire flow works end-to-end (20+ passing tests)
 
-Success is achieved when a participant can submit a topic, receive a magic link, schedule the topic, and see it appear on the public timetable without creating an account.
+Success is achieved when a participant can log in with their PyCon identity, submit a topic, schedule the topic, and see it appear on the public timetable without creating a separate account.
 
 > Note: the original PRD listed "File uploads" as a non-goal; topic cover-image
 > upload was later added by the owner's request (file upload + image URL).

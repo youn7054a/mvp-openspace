@@ -7,10 +7,10 @@ import tempfile
 # 앱 import 전에 환경 구성 (Configure env BEFORE importing the app).
 _TMP_DB = os.path.join(tempfile.mkdtemp(prefix="openspace-test-"), "test.db")
 os.environ["DATABASE_URL"] = f"sqlite:///{_TMP_DB}"
-os.environ["RESEND_API_KEY"] = ""  # 콘솔 폴백 강제 (force console fallback)
-os.environ["ADMIN_PASSWORD"] = "test-admin-pw"
+os.environ["ADMIN_EMAILS"] = "admin@test.com"  # 관리자 이메일 (이 이메일로 로그인=관리자)
 os.environ["BASE_URL"] = "http://testserver"
 os.environ["SESSION_SECRET"] = "test-session-secret"
+os.environ["DEV_LOGIN_ENABLED"] = "1"  # 테스트에서 수기 로그인(신원) 허용
 os.environ["UPLOAD_DIR"] = os.path.join(
     tempfile.mkdtemp(prefix="openspace-uploads-"), "uploads"
 )
@@ -36,19 +36,6 @@ def _reset_db():
 
 
 @pytest.fixture()
-def captured_tokens(monkeypatch):
-    """매직링크 토큰 캡처 (Capture issued magic-link tokens)."""
-    tokens: list[str] = []
-
-    def fake_send(to_email, token, topic_title):
-        tokens.append(token)
-        return f"http://testserver/manage/{token}"
-
-    monkeypatch.setattr("app.routes.public.send_magic_link", fake_send)
-    return tokens
-
-
-@pytest.fixture()
 def client():
     app = create_app()
     with TestClient(app) as c:
@@ -57,7 +44,13 @@ def client():
 
 @pytest.fixture()
 def admin_client(client):
-    """관리자 로그인된 클라이언트 (Authenticated admin client)."""
-    resp = client.post("/admin/login", data={"password": "test-admin-pw"})
-    assert resp.status_code == 200
-    return client
+    """관리자 클라이언트 (Admin) — 참가자 client 와 별개 세션.
+
+    관리자/참가자는 같은 session['identity'] 를 쓰므로, 둘을 동시에 쓰는 테스트를
+    위해 admin 은 별도 TestClient(같은 app·DB, 다른 쿠키)로 관리자 이메일 로그인.
+    """
+    admin = TestClient(client.app)
+    r = admin.post("/dev/login", data={"email": "admin@test.com"},
+                   follow_redirects=False)
+    assert r.status_code == 303
+    return admin

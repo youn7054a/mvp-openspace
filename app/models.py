@@ -27,10 +27,12 @@ class Topic(SQLModel, table=True):
     title: str
     description: str = ""
     host_name: str = ""  # 별명 (Nickname) — 선택 (optional)
-    host_email: str  # 비공개 (Never exposed publicly)
+    host_email: str  # 비공개 (Never exposed publicly) — 연락·표시용
+    # PyCon 회원 id — 소유권 키 (stable owner key). 이메일은 바뀔 수 있어 보조용.
+    # 소유권은 신원(PyCon 로그인)으로 확인하므로 매직링크 토큰은 쓰지 않는다.
+    host_pycon_id: Optional[int] = Field(default=None, index=True)
+    host_username: str = ""  # PyCon username — 기본 별명 후보 (display only)
     image_url: Optional[str] = Field(default=None)  # 주제 대표 이미지 (Topic cover image)
-    edit_token_hash: str = Field(index=True)  # 매직링크 토큰 해시만 저장 (hash only)
-    edit_token_expires_at: datetime
     status: TopicStatus = Field(default=TopicStatus.PROPOSED)
     is_hidden: bool = Field(default=False)  # 관리자 숨김 (Admin-hidden)
     created_at: datetime = Field(default_factory=utcnow)
@@ -45,7 +47,9 @@ class Topic(SQLModel, table=True):
     @property
     def display_host(self) -> str:
         """카드에 표시할 제안자 별명 (Nickname for display) — 비면 익명."""
-        return self.host_name.strip() or "익명 (Anonymous)"
+        from .i18n import t
+
+        return self.host_name.strip() or t("익명", "Anonymous")
 
 
 class Room(SQLModel, table=True):
@@ -78,7 +82,9 @@ class Timeslot(SQLModel, table=True):
     @property
     def closed_label(self) -> str:
         """닫힌 슬롯에 표시할 문구 (Label for a closed slot)."""
-        return self.label.strip() or "닫힘 (Closed)"
+        from .i18n import t
+
+        return self.label.strip() or t("닫힘", "Closed")
 
 
 class BoardQR(SQLModel, table=True):
