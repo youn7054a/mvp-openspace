@@ -6,6 +6,7 @@ import os
 import secrets
 
 from .config import get_settings
+from .i18n import t
 
 logger = logging.getLogger("openspace.uploads")
 
@@ -45,17 +46,17 @@ async def save_image(upload) -> str | None:
     content_type = (upload.content_type or "").lower().split(";")[0].strip()
     ext = _ALLOWED.get(content_type)
     if ext is None:
-        raise UploadError(
-            "지원하지 않는 이미지 형식입니다. PNG·JPG·GIF·WEBP만 가능합니다. "
-            "(Unsupported image type.)"
-        )
+        raise UploadError(t(
+            "지원하지 않는 이미지 형식입니다. PNG·JPG·GIF·WEBP만 가능합니다.",
+            "Unsupported image type — only PNG, JPG, GIF, WEBP are allowed.",
+        ))
 
     data = await upload.read()
     if len(data) > MAX_UPLOAD_BYTES:
-        raise UploadError(
-            "이미지가 너무 큽니다. 5MB 이하만 업로드할 수 있습니다. "
-            "(Image too large — 5MB max.)"
-        )
+        raise UploadError(t(
+            "이미지가 너무 큽니다. 5MB 이하만 업로드할 수 있습니다.",
+            "Image too large — 5MB max.",
+        ))
     if not data:
         return None
 
@@ -92,6 +93,7 @@ def normalize_image_url(raw: str | None) -> str | None:
         return None
     if raw.startswith("http://") or raw.startswith("https://"):
         return raw
-    raise UploadError(
-        "이미지 URL 은 http:// 또는 https:// 로 시작해야 합니다. (Invalid image URL.)"
-    )
+    raise UploadError(t(
+        "이미지 URL 은 http:// 또는 https:// 로 시작해야 합니다.",
+        "Image URL must start with http:// or https://.",
+    ))

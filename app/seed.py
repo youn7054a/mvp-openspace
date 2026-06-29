@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from sqlmodel import Session, select
 
 from .models import Room, ScheduleEntry, Timeslot, Topic
-from .security import generate_token, token_expiry
 
 # (제목, 별명, 설명, 이미지 URL) — 별명 빈칸은 '익명'으로 표시
 DEMO_TOPICS = [
@@ -104,11 +103,10 @@ def seed_demo(session: Session) -> dict[str, int]:
         repeat = i // len(DEMO_TOPICS)
         if repeat:  # 두 바퀴째부터는 제목에 번호를 붙여 중복 방지
             title = f"{title} ({repeat + 1})"
-        _, token_hash = generate_token()
         topics.append(Topic(
             title=title, host_name=nick, host_email=f"demo{i}@example.com",
+            host_pycon_id=900000 + i,  # 데모 소유자(가상 PyCon id)
             description=desc, image_url=(img or None),
-            edit_token_hash=token_hash, edit_token_expires_at=token_expiry(),
         ))
     session.add_all(topics)
     session.commit()
