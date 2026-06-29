@@ -18,24 +18,25 @@ from fasthtml.common import (
     P,
     Script,
     Section,
+    Small,
     Span,
 )
 from starlette.datastructures import UploadFile
 
 from ..components import (
-    PYCON_SESSION_URL,
-    PYCON_SIGNIN_URL,
     date_tabs,
     field,
     fmt_day_short,
     layout,
     notice,
+    pycon_login_gate,
     schedule_table,
     topic_card,
 )
 from ..database import get_session
 from ..mailer import send_magic_link
 from ..models import Topic
+from ..pycon import verified_email
 from ..queries import (
     BOARD_QR_SLOTS,
     active_topics,
@@ -100,71 +101,6 @@ _LIVE_PREVIEW_JS = """
   syncText();
 })();
 """
-
-
-# PyCon 로그인으로 주제 등록을 보호한다 (Gate topic submission behind PyCon login).
-# - allauth headless 세션 엔드포인트: 인증 시 data.user.email 제공.
-# - 쿠키가 필요하므로 브라우저에서 credentials:'include' 로 호출한다.
-# - 미로그인(확정) 시 버튼으로 새 창에서 로그인을 유도하고, 로그인 완료를
-#   주기적으로 확인해 자동으로 폼을 노출한다(팝업 차단 회피 위해 버튼 클릭 사용).
-# - PyCon 장애/네트워크 오류 시에는 막지 않고 수동 입력 폼을 노출한다(폴백).
-_PYCON_GATE_JS = """
-(function () {
-  var EP = '%s';
-  var SIGNIN = '%s';
-  var input = document.getElementById('f-host_email');
-  var status = document.getElementById('pycon-status');
-  var gate = document.getElementById('pycon-gate');
-  var grid = document.getElementById('new-grid');
-  var done = false, settled = false, poll = null;
-  function reveal() { if (gate) gate.hidden = true; if (grid) grid.hidden = false; }
-  function authedProceed(email) {
-    if (done) return; done = true;
-    if (poll) { clearInterval(poll); poll = null; }
-    if (email && input && !input.value.trim()) input.value = email;
-    if (email && status) {
-      status.textContent = 'PyCon 계정 이메일을 불러왔습니다 (' + email + ').';
-      status.hidden = false;
-    }
-    reveal();
-  }
-  function check(cb) {
-    fetch(EP, { credentials: 'include', headers: { 'Accept': 'application/json' } })
-      .then(function (r) { return r.json(); })
-      .then(function (b) {
-        var authed = b && b.meta && b.meta.is_authenticated;
-        var email = b && b.data && b.data.user && b.data.user.email;
-        cb(authed && email ? email : null, true);
-      })
-      .catch(function () { cb(null, false); });
-  }
-  function showLoginPrompt() {
-    if (!gate) return;
-    gate.hidden = false; gate.className = 'notice notice-info'; gate.textContent = '';
-    var msg = document.createElement('p');
-    msg.textContent = 'PyCon 로그인이 필요합니다. 아래 버튼을 누르면 새 창에서 ' +
-      '로그인할 수 있습니다. 로그인하면 자동으로 진행됩니다. ' +
-      '(Log in via PyCon in the new window — this page continues automatically.)';
-    var btn = document.createElement('button');
-    btn.type = 'button'; btn.className = 'btn'; btn.textContent = 'PyCon 로그인 (새 창)';
-    btn.addEventListener('click', function () {
-      window.open(SIGNIN, 'pycon-login', 'width=520,height=720');
-      if (!poll) poll = setInterval(function () {
-        check(function (email) { if (email) authedProceed(email); });
-      }, 3000);  // 로그인 완료를 주기적으로 확인
-    });
-    gate.appendChild(msg); gate.appendChild(btn);
-  }
-  // 응답이 영영 안 와도 막히지 않게 안전망(수동 입력 허용)
-  setTimeout(function () { if (!settled) { settled = true; reveal(); } }, 8000);
-  check(function (email, ok) {
-    if (settled) return; settled = true;
-    if (email) authedProceed(email);       // 로그인됨 → 진행
-    else if (ok) showLoginPrompt();         // 확정 미로그인 → 새 창 로그인 유도
-    else reveal();                          // 외부 장애 → 막지 않고 폼 노출
-  });
-})();
-""" % (PYCON_SESSION_URL, PYCON_SIGNIN_URL)
 
 
 def _new_error(message: str):
@@ -252,7 +188,16 @@ def register(app) -> None:
         )
 
     @app.get("/topics/new")
-    def topic_new_form():
+    def topic_new_form(request):
+        # 서버가 PyCon 세션을 검증한다 — 미로그인이면 등록 폼을 보여주지 않는다.
+        email = verified_email(request)
+        if not email:
+            return layout(
+                "주제 등록 (Submit Topic)",
+                H1("주제 등록 (Submit Topic)"),
+                pycon_login_gate("/topics/new"),
+                active="/topics/new", main_cls="content page-new",
+            )
         hero = Header(
             Span("주제 등록 (Submit Topic)", cls="eyebrow"),
             H1(Span("함께 이야기할"), Span("주제를 제안하세요"), cls="hero-title"),
@@ -264,9 +209,16 @@ def register(app) -> None:
             cls="page-hero",
         )
         form = Form(
-            field("이메일 (Email)", "host_email", input_type="email",
-                  placeholder="you@example.com"),
-            P(id="pycon-status", cls="field-help pycon-status", hidden=True),
+            # 이메일은 PyCon 계정에서 서버가 가져온 값 — 읽기 전용으로 보여준다.
+            # (POST 시에도 서버가 세션을 재검증하므로 임의 변경은 무시된다.)
+            Div(
+                Label("이메일 (Email)", fr="f-host_email"),
+                Input(id="f-host_email", name="host_email", value=email,
+                      type="email", readonly=True),
+                Small("PyCon 계정 이메일입니다. (Your PyCon account email.)",
+                      cls="field-help"),
+                cls="field",
+            ),
             field("별명 (Nickname)", "host_name", required=False,
                   placeholder="비워두면 익명으로 표시됩니다 (선택)"),
             field("주제 제목 (Topic Title)", "title",
@@ -302,31 +254,29 @@ def register(app) -> None:
             ),
             cls="pin-preview", aria_hidden="true",
         )
-        gate = Div(
-            P("PyCon 로그인 확인 중… (Checking your PyCon login…)"),
-            id="pycon-gate", cls="notice notice-info", role="status",
-        )
         return layout(
             "주제 등록 (Submit Topic)",
             hero,
-            gate,
             Div(Section(form, cls="form-col"), preview,
-                cls="new-grid", id="new-grid", hidden=True),
+                cls="new-grid", id="new-grid"),
             Script(_LIVE_PREVIEW_JS),
-            Script(_PYCON_GATE_JS),
             active="/topics/new", main_cls="content page-new",
         )
 
     @app.post("/topics/new")
-    async def topic_create(host_email: str, title: str, host_name: str = "",
+    async def topic_create(request, title: str, host_name: str = "",
                            description: str = "", image_url: str = "",
                            image_file: UploadFile = None):
+        # 이메일은 폼 값(읽기 전용)이 아니라 서버가 검증한 PyCon 세션에서 가져온다.
+        host_email = verified_email(request)
+        if not host_email:
+            return _new_error("PyCon 로그인이 필요합니다. 다시 로그인해 주세요. "
+                              "(PyCon login is required — please log in again.)")
         host_name = (host_name or "").strip()
-        host_email = (host_email or "").strip()
         title = (title or "").strip()
-        # 이메일·제목만 필수, 별명은 선택 (email + title required; nickname optional)
-        if not (host_email and title):
-            return _new_error("이메일과 제목은 필수입니다. (Email and title are required.)")
+        # 제목만 필수, 별명은 선택 (title required; nickname optional)
+        if not title:
+            return _new_error("제목은 필수입니다. (Title is required.)")
 
         # 이미지: 업로드 우선, 없으면 URL (uploaded file wins, else pasted URL)
         try:

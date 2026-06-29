@@ -51,6 +51,48 @@ PYCON_SESSION_URL = (
 )
 PYCON_SIGNIN_URL = "https://2026.pycon.kr/account/sign-in"
 
+# 미로그인일 때 완료를 확인하는 우리 서버측 프로브 (server-side auth probe).
+PYCON_PROBE_URL = "/pycon/session"
+
+
+def pycon_login_gate(reload_to: str):
+    """미로그인 게이트 (Login gate) — 새 창 PyCon 로그인 + 완료 시 자동 새로고침.
+
+    인증/이메일 검증은 전적으로 서버가 한다(app/pycon.py). 이 위젯은 새 창으로
+    로그인을 띄우고, 우리 서버의 PYCON_PROBE_URL 로 완료를 확인해 reload_to 로
+    페이지를 이동만 한다 — 이메일을 클라이언트가 다루지 않으므로 위조 불가하다.
+    """
+    js = """
+(function () {
+  var btn = document.getElementById('pycon-login-btn');
+  if (!btn) return;
+  var poll = null;
+  btn.addEventListener('click', function () {
+    window.open('%s', 'pycon-login', 'width=520,height=720');
+    if (!poll) poll = setInterval(function () {
+      fetch('%s', { credentials: 'include', headers: { 'Accept': 'application/json' } })
+        .then(function (r) { return r.json(); })
+        .then(function (b) {
+          if (b && b.authed) { clearInterval(poll); poll = null; location.href = '%s'; }
+        })
+        .catch(function () {});
+    }, 3000);  // 로그인 완료를 주기적으로 확인
+  });
+})();
+""" % (PYCON_SIGNIN_URL, PYCON_PROBE_URL, reload_to)
+    return Div(
+        Div(
+            P("PyCon 로그인이 필요합니다. 아래 버튼을 누르면 새 창에서 로그인할 수 "
+              "있고, 완료되면 자동으로 진행됩니다. "
+              "(Log in via PyCon — this page continues automatically.)"),
+            Button("PyCon 로그인 (새 창)", type="button", id="pycon-login-btn",
+                   cls="btn"),
+            cls="notice notice-info", role="status",
+        ),
+        Script(js),
+        cls="pycon-login-gate",
+    )
+
 
 def page_head(title: str, *, auto_refresh: int | None = None):
     """공통 <head> (Common head) — 메타/스타일/HTMX."""
@@ -279,6 +321,7 @@ def date_tabs(days, render_day, *, id_prefix: str, default_day: str | None = Non
 __all__ = [
     "layout", "field", "notice", "topic_card", "site_header", "page_head",
     "date_tabs", "day_caption", "fmt_day_short", "WEEKDAYS_KO", "schedule_table",
-    "NAV_ITEMS", "PYCON_SESSION_URL", "PYCON_SIGNIN_URL",
+    "NAV_ITEMS", "PYCON_SESSION_URL", "PYCON_SIGNIN_URL", "PYCON_PROBE_URL",
+    "pycon_login_gate",
     "Div", "P", "H1", "H2", "H3", "A", "Form", "Button", "Ul", "Li", "Span",
 ]

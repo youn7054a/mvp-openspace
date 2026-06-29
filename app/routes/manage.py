@@ -15,7 +15,6 @@ from fasthtml.common import (
     Legend,
     P,
     RedirectResponse,
-    Script,
     Section,
     Small,
     Span,
@@ -28,18 +27,19 @@ from fasthtml.common import (
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 from starlette.datastructures import UploadFile
+from starlette.responses import JSONResponse
 
 from ..components import (
-    PYCON_SESSION_URL,
-    PYCON_SIGNIN_URL,
     date_tabs,
     field,
     layout,
     notice,
+    pycon_login_gate,
 )
 from ..database import get_session
 from ..mailer import send_magic_link
 from ..models import ScheduleEntry, Timeslot, Topic, utcnow
+from ..pycon import verified_email
 from ..queries import all_rooms, all_timeslots, entry_for_topic, schedule_map
 from ..security import generate_token, hash_token, token_expiry
 from ..uploads import (
@@ -52,65 +52,44 @@ from ..uploads import (
 PANEL_ID = "manage-panel"
 
 
-# PyCon 로그인으로 '내 주제 수정'에 바로 진입 (Login → open my topic).
-# 로그인 확인되면 세션 이메일을 폼에 채워 본인 주제 조회를 자동 제출한다.
-# 미로그인이면 버튼으로 새 창에서 로그인을 유도하고, 완료를 주기적으로 확인해
-# 자동으로 이어간다(팝업 차단 회피 위해 버튼 클릭 사용).
-_MANAGE_LOGIN_JS = """
-(function () {
-  var EP = '%s';
-  var SIGNIN = '%s';
-  var form = document.getElementById('manage-resolve');
-  var emailField = document.getElementById('manage-email');
-  var gate = document.getElementById('manage-gate');
-  if (!form || !emailField) return;
-  var done = false, settled = false, poll = null;
-  function proceed(email) {
-    if (done) return; done = true;
-    if (poll) { clearInterval(poll); poll = null; }
-    emailField.value = email;
-    form.submit();  // 본인 주제 조회 (POST /manage/open)
-  }
-  function fail(text) { if (gate) gate.textContent = text; }
-  function check(cb) {
-    fetch(EP, { credentials: 'include', headers: { 'Accept': 'application/json' } })
-      .then(function (r) { return r.json(); })
-      .then(function (b) {
-        var authed = b && b.meta && b.meta.is_authenticated;
-        var email = b && b.data && b.data.user && b.data.user.email;
-        cb(authed && email ? email : null, true);
-      })
-      .catch(function () { cb(null, false); });
-  }
-  function showLoginPrompt() {
-    if (!gate) return;
-    gate.className = 'notice notice-info'; gate.textContent = '';
-    var msg = document.createElement('p');
-    msg.textContent = 'PyCon 로그인이 필요합니다. 아래 버튼을 누르면 새 창에서 ' +
-      '로그인할 수 있습니다. 로그인하면 자동으로 진행됩니다. ' +
-      '(Log in via PyCon in the new window — this page continues automatically.)';
-    var btn = document.createElement('button');
-    btn.type = 'button'; btn.className = 'btn'; btn.textContent = 'PyCon 로그인 (새 창)';
-    btn.addEventListener('click', function () {
-      window.open(SIGNIN, 'pycon-login', 'width=520,height=720');
-      if (!poll) poll = setInterval(function () {
-        check(function (email) { if (email) proceed(email); });
-      }, 3000);  // 로그인 완료를 주기적으로 확인
-    });
-    gate.appendChild(msg); gate.appendChild(btn);
-  }
-  setTimeout(function () {
-    if (!settled) { settled = true;
-      fail('PyCon 로그인 확인이 지연됩니다. 이메일로 받은 매직링크를 사용해 주세요.'); }
-  }, 8000);
-  check(function (email, ok) {
-    if (settled) return; settled = true;
-    if (email) proceed(email);              // 로그인됨 → 진행
-    else if (ok) showLoginPrompt();          // 확정 미로그인 → 새 창 로그인 유도
-    else fail('PyCon 로그인 확인에 실패했습니다. 이메일로 받은 매직링크를 사용해 주세요.');
-  });
-})();
-""" % (PYCON_SESSION_URL, PYCON_SIGNIN_URL)
+def _login_needed_page():
+    """미로그인 안내 — 공통 게이트(새 창 로그인 + 완료 시 자동 진행)."""
+    return layout(
+        "내 주제 수정 (Edit My Topic)",
+        H1("내 주제 수정 (Edit My Topic)"),
+        pycon_login_gate("/manage"),
+        active="/manage",
+    )
+
+
+def _no_topics_page(email: str):
+    """검증된 이메일로 등록된 주제가 없을 때 안내."""
+    return layout(
+        "내 주제 수정 (Edit My Topic)",
+        H1("내 주제 수정 (Edit My Topic)"),
+        notice(f"'{email}' 으로 등록된 주제가 없습니다. "
+               "(No topics found for this account.)"),
+        A("주제 등록하기 (Submit a topic)", href="/topics/new", cls="btn"),
+        active="/manage",
+    )
+
+
+def _chooser_page(email: str, topics: list[Topic]):
+    """주제가 여러 개면 하나를 고른다 — 제출 시 서버가 이메일을 재검증한다."""
+    choices = [
+        Form(
+            Input(type="hidden", name="topic_id", value=str(t.id)),
+            Button(t.title, type="submit", cls="btn secondary"),
+            method="post", action="/manage/open-one", cls="manage-pick",
+        ) for t in topics
+    ]
+    return layout(
+        "내 주제 수정 (Edit My Topic)",
+        H1("어떤 주제를 수정할까요? (Which topic?)"),
+        notice(f"{email} 으로 등록된 주제 {len(topics)}개입니다. 하나를 고르세요."),
+        *choices,
+        active="/manage",
+    )
 
 
 def _issue_token(session, topic: Topic) -> str:
@@ -119,8 +98,8 @@ def _issue_token(session, topic: Topic) -> str:
     직접 수정 페이지로 바로 보내는 동시에, 같은 링크를 이메일로도 발송한다 —
     다음엔 메일의 매직링크로 바로 들어올 수 있게.
 
-    주의: 이메일은 클라이언트(PyCon 세션)에서 전달되어 서버가 직접 검증하지
-    못한다 — 매직링크와 동일한 신뢰 수준의 편의 기능이다. (README 보안 참고)
+    이메일은 서버가 PyCon 세션 쿠키를 직접 검증해 얻으므로(app/pycon.py),
+    클라이언트가 위조할 수 없다 — 매직링크 발급의 정당한 근거다.
     """
     raw, token_hash = generate_token()
     topic.edit_token_hash = token_hash
@@ -334,62 +313,34 @@ def _panel(session, topic: Topic, *, msg=None):
 
 def register(app) -> None:
     # ---- 로그인 기반 '내 주제 수정' 진입 (Login-based entry, no token in URL) ----
+    # 인증/이메일은 서버가 PyCon 세션 쿠키를 직접 검증해 얻는다 (위조 불가).
     @app.get("/manage")
-    def manage_login():
-        # 숨은 폼: 로그인 확인되면 JS가 이메일을 채워 자동 제출한다.
-        resolve = Form(
-            Input(type="hidden", id="manage-email", name="email"),
-            id="manage-resolve", method="post", action="/manage/open",
-        )
-        gate = P("PyCon 로그인 확인 중… (Checking your PyCon login…)",
-                 id="manage-gate", cls="notice notice-info", role="status")
-        return layout(
-            "내 주제 수정 (Edit My Topic)",
-            H1("내 주제 수정 (Edit My Topic)"),
-            gate, resolve,
-            Script(_MANAGE_LOGIN_JS),
-            active="/manage",
-        )
-
-    @app.post("/manage/open")
-    def manage_open(email: str = ""):
-        email = (email or "").strip()
+    def manage_login(request):
+        email = verified_email(request)
         if not email:
-            return RedirectResponse(PYCON_SIGNIN_URL, status_code=303)
+            return _login_needed_page()
         with get_session() as session:
             topics = _topics_for_email(session, email)
             if not topics:
-                return layout(
-                    "내 주제 수정 (Edit My Topic)",
-                    H1("내 주제 수정 (Edit My Topic)"),
-                    notice(f"'{email}' 으로 등록된 주제가 없습니다. "
-                           "(No topics found for this email.)"),
-                    A("주제 등록하기 (Submit a topic)", href="/topics/new", cls="btn"),
-                    active="/manage",
-                )
+                return _no_topics_page(email)
             if len(topics) == 1:
                 raw = _issue_token(session, topics[0])
                 return RedirectResponse(f"/manage/{raw}?sent=1", status_code=303)
             # 여러 개면 어떤 주제를 수정할지 고른다 (multiple → choose one).
-            choices = [
-                Form(
-                    Input(type="hidden", name="email", value=email),
-                    Input(type="hidden", name="topic_id", value=str(t.id)),
-                    Button(t.title, type="submit", cls="btn secondary"),
-                    method="post", action="/manage/open-one", cls="manage-pick",
-                ) for t in topics
-            ]
-            return layout(
-                "내 주제 수정 (Edit My Topic)",
-                H1("어떤 주제를 수정할까요? (Which topic?)"),
-                notice(f"{email} 으로 등록된 주제 {len(topics)}개입니다. 하나를 고르세요."),
-                *choices,
-                active="/manage",
-            )
+            return _chooser_page(email, topics)
+
+    @app.get("/pycon/session")
+    def pycon_session_probe(request):
+        # 로그인 게이트(주제 등록/수정 공용)가 새 창 로그인 완료를 확인하는 프로브.
+        return JSONResponse({"authed": bool(verified_email(request))})
 
     @app.post("/manage/open-one")
-    def manage_open_one(topic_id: int = 0, email: str = ""):
-        email = (email or "").strip().lower()
+    def manage_open_one(request, topic_id: int = 0):
+        # 클라이언트가 보낸 이메일은 신뢰하지 않는다 — 세션을 다시 검증한다.
+        email = verified_email(request)
+        if not email:
+            return RedirectResponse("/manage", status_code=303)
+        email = email.lower()
         with get_session() as session:
             topic = session.get(Topic, topic_id)
             if (topic and topic.deleted_at is None

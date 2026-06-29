@@ -9,12 +9,12 @@ from app.models import BoardQR, Room, Timeslot, Topic
 
 def _submit_topic(client, captured_tokens, *, title="테스트 주제 (Test topic)",
                   email="host@example.com"):
+    # 로그인 사용자(서버 검증 이메일)는 헤더로 지정 — host_email 폼값은 무시된다.
     resp = client.post("/topics/new", data={
         "host_name": "홍길동",
-        "host_email": email,
         "title": title,
         "description": "설명 (desc)",
-    })
+    }, headers={"X-Test-Email": email})
     assert resp.status_code == 200
     assert "주제가 등록되었습니다" in resp.text
     assert captured_tokens, "매직링크 토큰이 발급되어야 함"
@@ -409,16 +409,17 @@ def test_nav_shows_participant_items_only(client):
 
 
 def _submit(client, *, email, title):
-    r = client.post("/topics/new", data={
-        "host_email": email, "title": title, "description": "d"})
+    # 로그인 사용자(서버 검증 이메일)는 헤더로 지정한다.
+    r = client.post("/topics/new", data={"title": title, "description": "d"},
+                    headers={"X-Test-Email": email})
     assert r.status_code == 200
 
 
 def test_manage_login_single_topic_reissues_token(client):
     # 로그인 이메일로 본인 주제 1개 → 새 토큰으로 관리 페이지 직행
     _submit(client, email="me@x.com", title="내 발표")
-    r = client.post("/manage/open", data={"email": "me@x.com"},
-                    follow_redirects=False)
+    r = client.get("/manage", headers={"X-Test-Email": "me@x.com"},
+                   follow_redirects=False)
     assert r.status_code == 303
     loc = r.headers["location"]
     assert loc.startswith("/manage/")
@@ -432,40 +433,54 @@ def test_manage_login_also_emails_magic_link(client, monkeypatch):
     monkeypatch.setattr("app.routes.manage.send_magic_link",
                         lambda to, token, title: sent.append((to, token)))
     _submit(client, email="me@x.com", title="내 발표")
-    r = client.post("/manage/open", data={"email": "me@x.com"},
-                    follow_redirects=False)
+    r = client.get("/manage", headers={"X-Test-Email": "me@x.com"},
+                   follow_redirects=False)
     assert r.status_code == 303
     assert sent and sent[0][0] == "me@x.com"          # 메일 발송됨
     assert "이메일로도 전송" in client.get(r.headers["location"]).text
+
+
+def test_manage_login_requires_pycon_login(client):
+    # 미로그인(세션 없음)이면 로그인 게이트를 보여준다 (no token in URL)
+    r = client.get("/manage", headers={"X-Test-Email": ""})
+    assert r.status_code == 200
+    assert "PyCon 로그인" in r.text and "pycon-login-btn" in r.text
+
+
+def test_topic_new_requires_pycon_login(client):
+    # 미로그인이면 주제 등록 폼 대신 로그인 게이트를 보여준다
+    r = client.get("/topics/new", headers={"X-Test-Email": ""})
+    assert r.status_code == 200
+    assert "PyCon 로그인" in r.text and "topic-form" not in r.text
 
 
 def test_manage_login_multiple_topics_choose(client):
     # 같은 이메일(대소문자 무시) 주제 2개 → 선택 페이지, 고르면 진입
     _submit(client, email="me@x.com", title="주제 하나")
     _submit(client, email="ME@x.com", title="주제 둘")
-    r = client.post("/manage/open", data={"email": "me@x.com"})
+    r = client.get("/manage", headers={"X-Test-Email": "me@x.com"})
     assert "어떤 주제" in r.text and "주제 하나" in r.text and "주제 둘" in r.text
     with get_session() as db:
         tid = [t.id for t in db.exec(select(Topic))
                if t.host_email.lower() == "me@x.com"][0]
-    r = client.post("/manage/open-one",
-                    data={"email": "me@x.com", "topic_id": str(tid)})
+    r = client.post("/manage/open-one", data={"topic_id": str(tid)},
+                    headers={"X-Test-Email": "me@x.com"})
     assert "내 주제 관리" in r.text
 
 
 def test_manage_open_one_rejects_email_mismatch(client):
-    # 다른 사람 이메일 주제는 열 수 없다 (소유권 보호)
+    # 다른 사람 이메일 주제는 열 수 없다 (소유권 보호 — 서버가 세션 재검증)
     _submit(client, email="other@x.com", title="남의 주제")
     with get_session() as db:
         other_id = db.exec(select(Topic)).first().id
-    r = client.post("/manage/open-one",
-                    data={"email": "me@x.com", "topic_id": str(other_id)},
+    r = client.post("/manage/open-one", data={"topic_id": str(other_id)},
+                    headers={"X-Test-Email": "me@x.com"},
                     follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == "/manage"
 
 
 def test_manage_open_no_match_shows_notice(client):
-    r = client.post("/manage/open", data={"email": "nobody@x.com"})
+    r = client.get("/manage", headers={"X-Test-Email": "nobody@x.com"})
     assert "등록된 주제가 없습니다" in r.text
 
 

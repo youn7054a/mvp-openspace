@@ -48,10 +48,27 @@ def captured_tokens(monkeypatch):
     return tokens
 
 
+@pytest.fixture(autouse=True)
+def pycon_login(monkeypatch):
+    """PyCon 세션 검증을 테스트에서 제어 (Control server-side PyCon verification).
+
+    실제로는 서버가 PyCon 세션 쿠키를 검증하지만, 테스트에서는 요청 헤더
+    'X-Test-Email' 을 로그인된 사용자로 간주한다. client 픽스처가 기본값을
+    심어두고, 특정 이메일이 필요한 호출은 헤더로 덮어쓴다.
+    """
+    def fake(request):
+        return (request.headers.get("x-test-email") or "").strip() or None
+
+    monkeypatch.setattr("app.routes.public.verified_email", fake)
+    monkeypatch.setattr("app.routes.manage.verified_email", fake)
+
+
 @pytest.fixture()
 def client():
     app = create_app()
     with TestClient(app) as c:
+        # 기본 로그인 사용자 (default logged-in PyCon user for submissions)
+        c.headers.update({"X-Test-Email": "host@example.com"})
         yield c
 
 
