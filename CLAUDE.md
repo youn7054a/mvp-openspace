@@ -113,8 +113,10 @@ Can:
 
 - Create rooms
 - Create time slots (bulk generator: date / start / length / break / count)
+- Lay out the whole grid in the Timetable Builder (add/edit/delete rows & columns inline)
 - Close slots with a custom label (e.g. 키노트, 휴식) — closed slots are not bookable
 - Assign / unassign topics to slots
+- Register display-board QR codes (2 slots: image + caption)
 - Hide topics
 - Delete topics
 - Seed or clear demo data (one click)
@@ -194,9 +196,16 @@ during the event.
 
 ### /
 
-Home — 내 주제 대시보드 (My-topics dashboard). **Requires identity** (soft login).
-Lists the signed-in participant's own topics (keyed by PyCon member id; one person
-can have several) + a "주제 등록" button. No identity → a "PyCon 로그인 필요" page.
+Home — 주제 등록 (Submit Topic) form. **Requires identity** (soft login). This is
+the first screen after login. Email and host_pycon_id come from the verified
+identity (not a form field); the participant fills nickname/title/description/image
+only. No identity → a "PyCon 로그인 필요" page.
+
+### /my
+
+MY — 내 주제 대시보드 (My-topics dashboard). **Requires identity**. Lists the
+signed-in participant's own topics (keyed by PyCon member id; one person can have
+several), each linking to `/manage/{topic_id}`.
 
 ### /topics
 
@@ -204,9 +213,14 @@ can have several) + a "주제 등록" button. No identity → a "PyCon 로그인
 
 ### /topics/new
 
-주제 등록 (Submit Topic) — **requires identity**. No "주제 등록" eyebrow. Email and
-host_pycon_id come from the verified identity (not a form field); the participant
-fills nickname/title/description/image only.
+Legacy path — **redirects to `/`** (the home is now the submit form). `POST
+/topics/new` still creates the topic (identity-gated).
+
+### /logout
+
+`POST /logout` clears the local identity session. `GET /auth/check` is a JSON probe
+(`{"authed": bool}`) used by the login gate to detect when a new-window PyCon login
+has completed.
 
 ### /schedule
 
@@ -215,9 +229,16 @@ becomes **interactive for that topic** (owner-only): click an open cell to regis
 move (POST `/schedule/{topic_id}/take`), cancel via `/schedule/{topic_id}/cancel`.
 The 2-day scheduling window applies (see Timetable Rule 3).
 
+### /schedule/own
+
+HTMX partial (identity-gated) — returns the owner scheduling area for a selected
+owned topic (`?topic={id}`); used when switching topics via chips on the timetable.
+
 ### /board
 
-전광판 (Display Board) — full timetable as cards, no-scroll, optional `?date=` day selector
+전광판 (Display Board) — full timetable as cards, no-scroll, optional `?date=` day
+selector. The page shell loads once and self-polls `GET /board/live` every 45s
+(HTMX `outerHTML` swap — flicker-free, replaces the old meta-refresh).
 
 ---
 
@@ -248,6 +269,13 @@ Functions:
 
 Topic moderation + assign topics to slots + seed/clear demo data
 
+### /admin/timetable
+
+타임테이블 짜기 (Timetable Builder) — a word-processor-style grid editor. Add times
+(rows) downward and rooms (columns) sideways with ＋, edit a slot's time / room name
+inline by clicking the cell, delete with ✕. A complement to the separate rooms /
+timeslots pages for quickly laying out the whole grid.
+
 ### /admin/rooms
 
 Room management
@@ -255,6 +283,11 @@ Room management
 ### /admin/timeslots
 
 Timeslot management — bulk generate, close/relabel/reopen slots
+
+### /admin/board
+
+전광판 QR (Board QR) — register the QR codes (2 slots) shown at the bottom of the
+display board (image upload / URL + caption — e.g. event info, survey link).
 
 ---
 
@@ -328,6 +361,15 @@ text id name sort_order created_at updated_at
 ## Timeslot
 
 text id starts_at ends_at sort_order is_closed label created_at updated_at
+
+---
+
+## BoardQR
+
+text id slot(1|2) image_url caption created_at updated_at
+
+Display-board QR codes — one row per slot (`unique(slot)`). Rendered as a QR strip
+at the bottom of `/board` (event info, survey, sponsor links, …).
 
 ---
 
@@ -542,7 +584,9 @@ Docker
 
 Display board (`/board`, `/board?date=YYYY-MM-DD`):
 
-- Auto refresh every 45 seconds (date selection persists across refresh)
+- Auto refresh every 45 seconds via HTMX self-polling of `/board/live` (flicker-free
+  `outerHTML` swap; date selection persists across refresh)
+- QR strip at the bottom (admin-registered BoardQR codes, up to 2)
 - Show the WHOLE timetable as cards, grouped by timeslot
 - Show empty slots too (비어있음/open) so attendees see open times
 - Closed slots shown as labeled cards (키노트, 휴식, …)
