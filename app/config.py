@@ -14,22 +14,24 @@ class Settings:
 
     def __init__(self) -> None:
         self.database_url: str = os.getenv("DATABASE_URL", "sqlite:///./openspace.db")
-        self.resend_api_key: str = os.getenv("RESEND_API_KEY", "").strip()
         self.base_url: str = os.getenv("BASE_URL", "http://localhost:5001").rstrip("/")
-        self.admin_password: str = os.getenv("ADMIN_PASSWORD", "change-me")
-        self.mail_from: str = os.getenv(
-            "MAIL_FROM", "OpenSpace <onboarding@resend.dev>"
-        )
+        # 관리자 이메일 목록 (Admin emails) — 이 이메일로 로그인하면 관리자 권한.
+        # 쉼표로 여러 개 (comma-separated), 대소문자 무시.
+        self.admin_emails: set[str] = {
+            e.strip().lower()
+            for e in os.getenv("ADMIN_EMAILS", "").split(",")
+            if e.strip()
+        }
         self.session_secret: str = os.getenv(
             "SESSION_SECRET", "dev-insecure-session-secret-change-me"
         )
         # 업로드 이미지 저장 디렉토리 (Uploaded image directory)
         self.upload_dir: str = os.getenv("UPLOAD_DIR", "./uploads")
-
-    @property
-    def email_enabled(self) -> bool:
-        """Resend 키가 있으면 실제 발송, 없으면 콘솔 폴백 (console fallback)."""
-        return bool(self.resend_api_key)
+        # 개발용 수기 로그인 허용 (Dev login bypass) — 운영(pycon.kr)에선 미설정.
+        self.dev_login_enabled: bool = (
+            os.getenv("DEV_LOGIN_ENABLED", "").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
 
 
 @lru_cache
