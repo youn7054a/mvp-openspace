@@ -86,6 +86,24 @@ def is_admin_email(identity: Identity | None) -> bool:
     return identity.email.strip().lower() in get_settings().admin_emails
 
 
+# 외부로 보내면 안 되는 우리 앱 쿠키 (our own cookies — never forward to PyCon).
+_APP_COOKIE_NAMES = {"session_", "lang"}
+
+
+def _strip_app_cookies(cookie_header: str) -> str:
+    """Cookie 헤더에서 우리 앱 쿠키를 제거하고 나머지만 반환."""
+    from http.cookies import SimpleCookie
+
+    try:
+        jar = SimpleCookie()
+        jar.load(cookie_header)
+        for name in _APP_COOKIE_NAMES:
+            jar.pop(name, None)
+        return "; ".join(f"{k}={m.value}" for k, m in jar.items())
+    except Exception:  # pragma: no cover - 파싱 실패 시 통째로 보내지 않음(빈값)
+        return ""
+
+
 def _verify_with_pycon(request) -> Identity | None:
     """요청 쿠키를 PyCon 세션 API로 전달해 신원을 서버 검증한다.
 
@@ -97,6 +115,11 @@ def _verify_with_pycon(request) -> Identity | None:
     if get_settings().dev_login_enabled:
         return None
     cookie = request.headers.get("cookie")
+    if not cookie:
+        return None
+    # 우리 앱 쿠키(서명 세션 'session_', 언어 'lang')는 외부 API로 보내지 않는다
+    # (최소 권한 — PyCon 은 자기 .pycon.kr 세션 쿠키만 필요).
+    cookie = _strip_app_cookies(cookie)
     if not cookie:
         return None
     try:
@@ -168,6 +191,19 @@ _LOGIN_GATE_JS = """
   });
 })();
 """
+
+
+def login_required(request, redirect: str = "/"):
+    """미인증 응답 — HTMX 요청이면 HX-Redirect(전체 페이지 이동), 아니면 로그인 페이지.
+
+    HTMX 호출(hx-post/get)에 전체 HTML 페이지를 그대로 돌려주면 작은 타깃 안에
+    페이지가 중첩 렌더돼 UI 가 깨지므로, HX-Redirect 헤더로 페이지를 통째 이동시킨다.
+    """
+    if request is not None and request.headers.get("hx-request"):
+        from starlette.responses import Response
+
+        return Response(headers={"HX-Redirect": redirect})
+    return login_required_page()
 
 
 def login_required_page():
