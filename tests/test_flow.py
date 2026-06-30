@@ -524,6 +524,32 @@ def test_manage_redirects_to_my(client):
     assert r.status_code == 303 and r.headers["location"] == "/my"
 
 
+def test_htmx_unauth_uses_hx_redirect(client):
+    # HTMX 미인증 요청은 전체 페이지 대신 HX-Redirect 헤더 (타깃 안 깨짐)
+    r = client.post("/schedule/1/take", data={"slot": "1:1"},
+                    headers={"hx-request": "true"}, follow_redirects=False)
+    assert r.headers.get("HX-Redirect") == "/" and len(r.text) < 5
+    # 일반(비-HTMX) 요청은 로그인 페이지 전체
+    assert "로그인이 필요" in client.post("/schedule/1/take", data={"slot": "1:1"}).text
+
+
+def test_schedule_no_access_keeps_target_id(client, admin_client):
+    # 소유 아닌 주제로 take → #sched-interactive id 유지(이후 조작 가능)
+    _submit(client, email="other@x.com", title="남의 것")
+    with get_session() as db:
+        other_id = db.exec(select(Topic)).first().id
+    login(client, "me@x.com")
+    r = client.post(f"/schedule/{other_id}/take", data={"slot": "1:1"})
+    assert "접근 권한이 없" in r.text and 'id="sched-interactive"' in r.text
+
+
+def test_pycon_cookie_filter_strips_app_cookies():
+    from app.auth import _strip_app_cookies
+    out = _strip_app_cookies("session_=A.sig; lang=en; pycon_sessionid=XYZ")
+    assert "session_" not in out and "lang=" not in out
+    assert "pycon_sessionid=XYZ" in out
+
+
 def test_auth_check_probe(client):
     # 로그인 게이트의 새 창 로그인 완료 확인 프로브
     assert client.get("/auth/check").json() == {"authed": False}

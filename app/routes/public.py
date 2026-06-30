@@ -42,6 +42,7 @@ from ..auth import (
     Identity,
     clear_identity,
     identity_from_session,
+    login_required,
     login_required_page,
     note_identity,
     resolve_identity,
@@ -609,11 +610,12 @@ def register(app) -> None:
         # 칩 클릭 시 호출되는 HTMX 파셜 — 선택 주제로 영역(#sched-owner)을 교체.
         identity = identity_from_session(session)
         if not identity:
-            return login_required_page()
+            return login_required(request, "/")
         with get_session() as db:
             mine = topics_for_owner(db, identity)
             if not mine:
-                return notice(t("등록한 주제가 없습니다.", "No topics yet."), kind="error")
+                return Div(notice(t("등록한 주제가 없습니다.", "No topics yet."),
+                                  kind="error"), id="sched-owner")
             selected = topic if any(m.id == topic for m in mine) else mine[0].id
             return _owner_schedule_area(db, mine, selected)
 
@@ -621,11 +623,12 @@ def register(app) -> None:
     def schedule_take(request, session, topic_id: int, slot: str = ""):
         identity = resolve_identity(request, session)
         if not identity:
-            return login_required_page()
+            return login_required(request, "/")
         with get_session() as db:
             topic = get_owned_topic(db, topic_id, identity)
             if not topic:
-                return notice(t("접근 권한이 없습니다.", "No access."), kind="error")
+                return Div(notice(t("접근 권한이 없습니다.", "No access."),
+                                  kind="error"), id=SCHED_ID)
             if not is_scheduling_open(db):
                 opens_on = scheduling_opens_on(db)
                 msg = (t("타임테이블 등록은 행사 이틀 전부터 열립니다.",
@@ -660,11 +663,12 @@ def register(app) -> None:
     def schedule_cancel(request, session, topic_id: int):
         identity = resolve_identity(request, session)
         if not identity:
-            return login_required_page()
+            return login_required(request, "/")
         with get_session() as db:
             topic = get_owned_topic(db, topic_id, identity)
             if not topic:
-                return notice(t("접근 권한이 없습니다.", "No access."), kind="error")
+                return Div(notice(t("접근 권한이 없습니다.", "No access."),
+                                  kind="error"), id=SCHED_ID)
             entry = entry_for_topic(db, topic.id)
             if entry:
                 db.delete(entry)
