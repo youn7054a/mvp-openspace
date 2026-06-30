@@ -307,8 +307,14 @@ def topic_card(topic, *, scheduled_label: str | None = None):
     else:
         status = Span(t("미배정", "Unscheduled"), cls="topic-status is-open")
 
+    # 유형 배지 (Kind badge) — 대화 / 이벤트
+    if topic.is_event:
+        kind_badge = Span(t("이벤트", "Event"), cls="kind-badge is-event")
+    else:
+        kind_badge = Span(t("대화", "Conversation"), cls="kind-badge is-conversation")
+
     children += [
-        H3(topic.title, cls="topic-title"),
+        H3(kind_badge, " ", topic.title, cls="topic-title"),
         P(topic.description or t("(설명 없음)", "(No description)"), cls="topic-desc"),
         Footer(
             Span(f"{t('제안자', 'Host')}: {topic.display_host}", cls="topic-host"),
@@ -319,20 +325,31 @@ def topic_card(topic, *, scheduled_label: str | None = None):
     return Article(*children, cls="topic-card sticker")
 
 
-def schedule_table(rooms, timeslots, slots, topics, *, empty_notice=None):
+def schedule_table(rooms, timeslots, slots, topics, *, events=None,
+                   empty_notice=None):
     """룸×타임슬롯 격자 표 (Room×timeslot grid table).
 
     slots: (room_id, timeslot_id) -> ScheduleEntry. topics: id -> Topic.
-    닫힌 슬롯은 라벨을 전체 열에 표시, 빈 칸은 '비어있음', 배정된 칸은 제목.
+    events: timeslot_id -> [Topic] (시간만 등록된 이벤트). 룸 칸들 위에 전체폭
+    배너 줄로 표시한다. 닫힌 슬롯은 라벨을 전체 열에 표시, 빈 칸은 '비어있음'.
     """
     if not rooms or not timeslots:
         return empty_notice or notice(t(
             "아직 룸/타임슬롯이 없습니다. 관리자가 먼저 등록해야 합니다.",
             "No rooms/timeslots yet — admin must add them.",
         ))
+    events = events or {}
     header = Tr(Th(t("시간 / 룸", "Time / Room")), *[Th(r.name) for r in rooms])
     rows = []
     for ts in timeslots:
+        # 이벤트(시간만 등록)는 룸 칸들 위 전체폭 배너 줄로 — 여러 개면 여러 줄.
+        for ev in events.get(ts.id, []):
+            rows.append(Tr(
+                Th(ts.time_label, scope="row"),
+                Td(Span(t("이벤트", "Event"), cls="kind-badge is-event"),
+                   " ", ev.title, colspan=len(rooms), cls="slot-event",
+                   title=ev.title),
+            ))
         if ts.is_closed:
             rows.append(Tr(
                 Th(ts.time_label, scope="row"),

@@ -5,7 +5,17 @@ from datetime import datetime, timedelta
 
 from sqlmodel import Session, select
 
-from .models import Room, ScheduleEntry, Timeslot, Topic
+from .models import Room, ScheduleEntry, Timeslot, Topic, TopicKind
+
+# (제목, 별명, 설명, 이미지 URL) — 시간에만 등록되는 이벤트 데모
+DEMO_EVENTS = [
+    ("점심 번개모임 ⚡", "운영팀",
+     "점심시간에 로비에서 자유롭게 모여 이야기 나눠요. 룸 없이 진행됩니다.",
+     "https://picsum.photos/seed/osev1/640/360"),
+    ("보드게임 나이트 🎲", "",
+     "행사 끝나고 함께 보드게임 한 판! 장소 무관, 시간만 잡아둔 이벤트예요.",
+     None),
+]
 
 # (제목, 별명, 설명, 이미지 URL) — 별명 빈칸은 '익명'으로 표시
 DEMO_TOPICS = [
@@ -118,7 +128,24 @@ def seed_demo(session: Session) -> dict[str, int]:
         session.add(ScheduleEntry(topic_id=topic.id, room_id=room_id,
                                   timeslot_id=ts_id))
     scheduled = len(open_pairs)
+
+    # 이벤트(시간만 등록) 데모 — 룸 없이 열린 시간대에 배너로 표시(대화와 공존).
+    events: list[Topic] = []
+    for i, (title, nick, desc, img) in enumerate(DEMO_EVENTS):
+        events.append(Topic(
+            title=title, host_name=nick, host_email=f"demoev{i}@example.com",
+            host_pycon_id=910000 + i, description=desc,
+            image_url=(img or None), kind=TopicKind.EVENT,
+        ))
+    session.add_all(events)
+    session.commit()
+    for ev in events:
+        session.refresh(ev)
+    for ev, ts in zip(events, open_slots):
+        # room_id 없이 시간대에만 등록 (event = time-only).
+        session.add(ScheduleEntry(topic_id=ev.id, room_id=None, timeslot_id=ts.id))
+        scheduled += 1
     session.commit()
 
     return {"rooms": len(rooms), "timeslots": len(slots),
-            "topics": len(topics), "scheduled": scheduled}
+            "topics": len(topics) + len(events), "scheduled": scheduled}

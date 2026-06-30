@@ -38,9 +38,32 @@ def all_timeslots(session: Session) -> list[Timeslot]:
 
 
 def schedule_map(session: Session) -> dict[tuple[int, int], ScheduleEntry]:
-    """(room_id, timeslot_id) -> ScheduleEntry 매핑."""
-    entries = session.exec(select(ScheduleEntry))
+    """(room_id, timeslot_id) -> ScheduleEntry 매핑 — 대화(룸 배정)만.
+
+    이벤트(room_id 가 NULL)는 룸 그리드에 들어가지 않으므로 제외한다.
+    """
+    entries = session.exec(select(ScheduleEntry).where(ScheduleEntry.room_id != None))  # noqa: E711
     return {(e.room_id, e.timeslot_id): e for e in entries}
+
+
+def events_by_timeslot(session: Session) -> dict[int, list[Topic]]:
+    """timeslot_id -> 그 시간대에 등록된 이벤트 주제들 (시간만 등록, 룸 없음).
+
+    room_id 가 NULL 인 ScheduleEntry 를 활성 Topic 과 묶는다. 타임테이블 표·
+    전광판에서 룸 칸들 위 배너로 표시할 때 공용으로 쓴다.
+    """
+    entries = list(session.exec(
+        select(ScheduleEntry).where(ScheduleEntry.room_id == None)  # noqa: E711
+    ))
+    if not entries:
+        return {}
+    topics = {t.id: t for t in session.exec(select(Topic))}
+    out: dict[int, list[Topic]] = {}
+    for e in entries:
+        tp = topics.get(e.topic_id)
+        if tp and tp.is_active:
+            out.setdefault(e.timeslot_id, []).append(tp)
+    return out
 
 
 def entry_for_topic(session: Session, topic_id: int) -> ScheduleEntry | None:

@@ -51,7 +51,7 @@ from ..auth import (
 from ..config import get_settings
 from ..database import get_session
 from ..i18n import normalize_lang, t
-from ..models import ScheduleEntry, Timeslot, Topic, utcnow
+from ..models import ScheduleEntry, Timeslot, Topic, TopicKind, utcnow
 from ..queries import (
     BOARD_QR_SLOTS,
     active_topics,
@@ -59,6 +59,7 @@ from ..queries import (
     all_timeslots,
     board_qrs,
     entry_for_topic,
+    events_by_timeslot,
     get_owned_topic,
     is_scheduling_open,
     schedule_map,
@@ -141,6 +142,31 @@ def _new_error(message: str):
     )
 
 
+def _kind_field():
+    """주제 유형 선택 (Topic type) — 대화/이벤트, 등록 시 1회 고정.
+
+    '주제 대표 이미지'와 같은 Fieldset/Legend 박스 형식, 라디오는 가로 배치.
+    """
+    from fasthtml.common import Fieldset, Legend
+
+    def opt(value, label, checked=False):
+        return Label(
+            Input(type="radio", name="kind", value=value, checked=checked),
+            Span(label, cls="kind-name"),
+            cls="kind-option",
+        )
+
+    return Fieldset(
+        Legend(t("주제 유형", "Topic type")),
+        Div(
+            opt("conversation", t("대화", "Conversation"), checked=True),
+            opt("event", t("이벤트", "Event")),
+            cls="kind-options",
+        ),
+        cls="image-fields",  # '주제 대표 이미지'와 동일한 박스 스타일 재사용
+    )
+
+
 def _image_fields():
     """주제 대표 이미지 입력 (Topic image) — 업로드 또는 URL 둘 다 지원."""
     from fasthtml.common import Fieldset, Legend, Small
@@ -185,6 +211,7 @@ def _new_topic_view(identity, anchor_id: str = "new") -> list:
     )
     form = Form(
         account_field(identity.email),
+        _kind_field(),
         *topic_text_fields(),
         _image_fields(),
         Button(t("주제 등록", "Submit"), type="submit", cls="btn btn-pin"),
@@ -287,6 +314,40 @@ def _sched_grid(rooms, timeslots, taken, tid, current_entry, *, schedulable,
                cls="schedule-scroll")
 
 
+def _sched_event_grid(timeslots, tid, current_entry, *, schedulable):
+    """이벤트(시간만)용 등록 표 — 시간대마다 전체폭 버튼 한 개.
+
+    이벤트는 룸을 잡지 않으므로 룸 칸 대신 '이 시간에 등록' 버튼을 보여준다.
+    같은 시간에 이벤트 여러 개가 가능하므로 '사용 중' 상태는 없다(내 자리만 표시).
+    """
+    header = Tr(Th(t("시간", "Time")), Th(t("이벤트", "Event")))
+    rows = []
+    for ts in timeslots:
+        if ts.is_closed:
+            rows.append(Tr(Th(ts.time_label, scope="row"),
+                           Td(ts.closed_label, cls="slot-closed")))
+            continue
+        is_mine = current_entry and current_entry.timeslot_id == ts.id
+        if is_mine:
+            cell = Td(Span(t("✓ 내 이벤트", "✓ My event"), cls="slot-tag"),
+                      cls="slot-mine",
+                      aria_label=t("현재 내 자리", "My current slot"))
+        elif not schedulable:
+            cell = Td(Span(t("비어있음", "Open"), cls="slot-tag"), cls="slot-open")
+        else:
+            label = (t("여기로 이동", "Move here") if current_entry
+                     else t("이 시간에 등록", "Register here"))
+            cell = Td(Button(label, type="button",
+                             hx_post=f"/schedule/{tid}/take",
+                             hx_vals=f'{{"slot": "{ts.id}"}}',
+                             hx_target=f"#{SCHED_ID}", hx_swap="outerHTML",
+                             cls="slot-pick"),
+                      cls="slot-open")
+        rows.append(Tr(Th(ts.time_label, scope="row"), cell))
+    return Div(Table(Thead(header), *rows, cls="schedule manage-schedule"),
+               cls="schedule-scroll")
+
+
 def _sched_interactive(db, topic):
     """내 주제 기준 인터랙티브 타임테이블 (htmx swap 대상)."""
     tid = topic.id
@@ -295,7 +356,8 @@ def _sched_interactive(db, topic):
     timeslots = all_timeslots(db)
     children = []
 
-    if not rooms or not timeslots:
+    # 이벤트는 룸이 없어도 시간만 있으면 등록 가능 — 룸 필요는 대화에만.
+    if not timeslots or (not topic.is_event and not rooms):
         children.append(notice(t(
             "아직 룸/타임슬롯이 없습니다. 관리자에게 문의하세요.",
             "No rooms/timeslots yet — contact the admin.")))
@@ -306,9 +368,12 @@ def _sched_interactive(db, topic):
     taken = schedule_map(db)
 
     if entry:
-        room = next((r for r in rooms if r.id == entry.room_id), None)
         ts = db.get(Timeslot, entry.timeslot_id)
-        label = f"{room.name if room else '?'} · {ts.time_label if ts else '?'}"
+        if topic.is_event:
+            label = ts.time_label if ts else "?"
+        else:
+            room = next((r for r in rooms if r.id == entry.room_id), None)
+            label = f"{room.name if room else '?'} · {ts.time_label if ts else '?'}"
         children.append(notice(f"{t('현재 배정', 'Scheduled')}: {label}", kind="success"))
 
     if not schedulable:
@@ -332,6 +397,9 @@ def _sched_interactive(db, topic):
     def render_day(day: str):
         day_slots = [ts for ts in timeslots
                      if ts.starts_at.date().isoformat() == day]
+        if topic.is_event:
+            return _sched_event_grid(day_slots, tid, entry,
+                                     schedulable=schedulable)
         return _sched_grid(rooms, day_slots, taken, tid, entry,
                            schedulable=schedulable, mine_title=topic.title)
 
@@ -519,12 +587,16 @@ def register(app) -> None:
     @app.post("/topics/new")
     async def topic_create(request, session, title: str, host_name: str = "",
                            description: str = "", image_url: str = "",
+                           kind: str = "conversation",
                            image_file: UploadFile = None):
         identity = resolve_identity(request, session)
         if not identity:
             return login_required_page()
         host_name = (host_name or "").strip()
         title = (title or "").strip()
+        # 유형 화이트리스트 — 알 수 없는 값은 대화로 폴백.
+        topic_kind = (TopicKind.EVENT if kind == "event"
+                      else TopicKind.CONVERSATION)
         # 제목만 필수, 별명은 선택. 이메일·소유권은 신원에서 공급.
         if not title:
             return _new_error(t("제목은 필수입니다.", "Title is required."))
@@ -545,6 +617,7 @@ def register(app) -> None:
                 host_pycon_id=identity.pycon_id,
                 host_username=identity.username,
                 image_url=final_image,
+                kind=topic_kind,
             )
             db.add(topic)
             db.commit()
@@ -587,15 +660,16 @@ def register(app) -> None:
             timeslots = all_timeslots(db)
             slots = schedule_map(db)
             topics = topics_by_id(db)
+            events = events_by_timeslot(db)
         if not rooms or not timeslots:
-            body = schedule_table(rooms, timeslots, slots, topics)
+            body = schedule_table(rooms, timeslots, slots, topics, events=events)
         else:
             days = sorted({ts.starts_at.date().isoformat() for ts in timeslots})
 
             def render_day(day: str):
                 day_ts = [ts for ts in timeslots
                           if ts.starts_at.date().isoformat() == day]
-                return schedule_table(rooms, day_ts, slots, topics)
+                return schedule_table(rooms, day_ts, slots, topics, events=events)
 
             body = date_tabs(days, render_day, id_prefix="sday")
         return layout(
@@ -637,7 +711,11 @@ def register(app) -> None:
                 return Div(notice(msg, kind="error"),
                            _sched_interactive(db, topic))
             try:
-                room_id, ts_id = (int(x) for x in slot.split(":"))
+                if topic.is_event:
+                    # 이벤트는 시간만 — slot 은 timeslot id 단독, 룸은 없음.
+                    room_id, ts_id = None, int(slot)
+                else:
+                    room_id, ts_id = (int(x) for x in slot.split(":"))
             except (ValueError, AttributeError):
                 return Div(notice(t("슬롯 선택이 올바르지 않습니다.", "Invalid slot."),
                                   kind="error"), _sched_interactive(db, topic))
@@ -697,6 +775,7 @@ def _board_live(date: str):
         all_ts = all_timeslots(session)
         slots = schedule_map(session)
         topics = topics_by_id(session)
+        events = events_by_timeslot(session)
         qrs = board_qrs(session)
 
     # 행사 일자 선택 (Pick which day to show on the board).
@@ -707,6 +786,8 @@ def _board_live(date: str):
     # 선택한 날의 타임테이블을 한 화면(스크롤 없음)에 카드로 채운다.
     sections = []
     for ts in timeslots:
+        # 이벤트(시간만)는 룸 카드들 위에 전체폭 배너 카드로 — 여러 개면 여러 줄.
+        ev_banners = [_board_event_card(ev) for ev in events.get(ts.id, [])]
         if ts.is_closed:
             # 닫힌 슬롯(키노트·휴식 등)도 카드 한 장으로 표시 — 세션 행과 비슷한 비중
             body = Div(Article(Div(ts.closed_label, cls="title"),
@@ -725,8 +806,12 @@ def _board_live(date: str):
                     cards.append(_board_empty_card(room))  # 빈 칸도 표시
             body = Div(*cards, cls="board-grid")
             # 세션이 있는 행은 높게(제목 다 보이게), 빈 행은 낮게 — 무스크롤 유지
-            weight = 2.6 if has_session else 1.0
-        sections.append(Section(H2(ts.time_label), body,
+            weight = 2.6 if (has_session or ev_banners) else 1.0
+        section_children = [H2(ts.time_label)]
+        if ev_banners:
+            section_children.append(Div(*ev_banners, cls="board-events"))
+        section_children.append(body)
+        sections.append(Section(*section_children,
                                 cls="board-section", style=f"flex:{weight}"))
 
     # 날짜 탭 (Date tabs) — 여러 날일 때만 노출, ?date= 로 선택 유지
@@ -777,6 +862,24 @@ def _board_card(room, topic):
         attrs["style"] = f"background-image:url('{url}')"
     return Article(
         Div(room.name, cls="room"),
+        Div(topic.title, cls="title"),
+        cls=cls, **attrs,
+    )
+
+
+def _board_event_card(topic):
+    """전광판 이벤트 배너 카드 (Board event banner) — 시간만 등록(룸 없음).
+
+    룸 카드들 위에 전체폭으로 깔아 '이 시간에 진행되는 이벤트'임을 강조한다.
+    """
+    cls = "board-session board-event"
+    attrs = {}
+    url = topic.image_url
+    if url and not any(ch in url for ch in "'\")\\ \n\t"):
+        cls += " has-image"
+        attrs["style"] = f"background-image:url('{url}')"
+    return Article(
+        Div(t("이벤트", "Event"), cls="room board-event-tag"),
         Div(topic.title, cls="title"),
         cls=cls, **attrs,
     )
