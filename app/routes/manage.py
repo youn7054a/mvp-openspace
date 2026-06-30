@@ -20,7 +20,7 @@ from fasthtml.common import (
 )
 from starlette.datastructures import UploadFile
 
-from ..auth import login_required_page, resolve_identity
+from ..auth import login_required, login_required_page, resolve_identity
 from ..components import (
     account_field,
     layout,
@@ -150,7 +150,7 @@ def register(app) -> None:
                           image_file: UploadFile = None):
         identity = resolve_identity(request, session)
         if not identity:
-            return login_required_page()
+            return login_required(request, "/my")
         with get_session() as db:
             topic = get_owned_topic(db, topic_id, identity)
             if not topic:
@@ -190,7 +190,7 @@ def register(app) -> None:
     def manage_delete(request, session, topic_id: int):
         identity = resolve_identity(request, session)
         if not identity:
-            return login_required_page()
+            return login_required(request, "/my")
         with get_session() as db:
             topic = get_owned_topic(db, topic_id, identity)
             if not topic:
