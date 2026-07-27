@@ -655,7 +655,7 @@ def test_board_shows_full_timetable(client, admin_client):
 
 
 def test_seed_demo_data(client, admin_client):
-    from app.models import Room, ScheduleEntry, Topic
+    from app.models import Room, ScheduleEntry, Topic, TopicKind
 
     resp = admin_client.post("/admin/seed")
     assert resp.status_code == 200
@@ -668,12 +668,18 @@ def test_seed_demo_data(client, admin_client):
         assert len(rooms) == 5
         assert len(slots) == 8
         assert any(s.is_closed for s in slots)
-        # 모든 열린 칸(열린 슬롯 × 룸)이 빠짐없이 채워진다
+        # 모든 열린 칸(열린 슬롯 × 룸)이 빠짐없이 채워진다 (대화 = 룸 배정 entry)
         open_slots = [s for s in slots if not s.is_closed]
-        expected = len(open_slots) * len(rooms)
-        assert len(entries) == expected
-        assert len(topics) == expected
-        filled = {(e.room_id, e.timeslot_id) for e in entries}
+        cell_count = len(open_slots) * len(rooms)
+        conv_entries = [e for e in entries if e.room_id is not None]
+        event_entries = [e for e in entries if e.room_id is None]
+        assert len(conv_entries) == cell_count
+        # 이벤트(시간만 등록) 데모도 함께 시드된다 (room_id 없음)
+        events = [t for t in topics if t.kind == TopicKind.EVENT]
+        assert len(events) >= 1
+        assert len(event_entries) == len(events)
+        assert len(topics) == cell_count + len(events)
+        filled = {(e.room_id, e.timeslot_id) for e in conv_entries}
         for s in open_slots:
             for r in rooms:
                 assert (r.id, s.id) in filled  # 빈 칸 없음
@@ -681,6 +687,8 @@ def test_seed_demo_data(client, admin_client):
     # 공개 화면에 데모 데이터가 보임 (demo data visible publicly)
     assert "파이썬 타입 힌트" in client.get("/topics").text
     assert "키노트" in client.get("/schedule").text
+    # 이벤트가 타임테이블에 배너로 노출됨
+    assert "점심 번개모임" in client.get("/schedule").text
 
     # 전광판: 전 세션이 가득 차서 빈 슬롯(비어있음)이 없어야 함
     board = client.get("/board").text
@@ -712,6 +720,110 @@ def test_admin_requires_auth(client):
     # 비로그인/비관리자 → 관리 페이지 접근 차단(홈으로 리다이렉트)
     r = client.get("/admin/topics", follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == "/"
+
+
+# ---- 주제 유형: 대화 vs 이벤트 (Topic kind: conversation vs event) ----
+def _submit_event(client, *, title="이벤트 주제 (Event)",
+                  email="host@example.com", pycon_id=0):
+    """이벤트 유형으로 주제 등록 — 생성된 id 반환."""
+    login(client, email, pycon_id)
+    resp = client.post("/topics/new", data={
+        "host_name": "이벤트장", "title": title,
+        "description": "이벤트 설명 (event desc)", "kind": "event",
+    })
+    assert resp.status_code == 200
+    assert "주제가 등록되었습니다" in resp.text
+    with get_session() as db:
+        return db.exec(select(Topic).where(Topic.title == title)
+                       .order_by(Topic.id.desc())).first().id
+
+
+def test_submit_event_topic_sets_kind(client):
+    from app.models import TopicKind
+
+    tid = _submit_event(client, title="이벤트 단독 (Solo event)")
+    with get_session() as db:
+        topic = db.get(Topic, tid)
+        assert topic.kind == TopicKind.EVENT
+        assert topic.is_event is True
+
+
+def test_event_schedules_to_timeslot_only(client, admin_client):
+    # 이벤트는 시간만 등록 — slot 은 ts_id 단독, room_id 는 NULL 로 저장
+    from app.models import ScheduleEntry
+
+    _room_id, ts_id = _seed_room_and_slot(admin_client)
+    tid = _submit_event(client)
+
+    resp = client.post(f"/schedule/{tid}/take", data={"slot": str(ts_id)})
+    assert resp.status_code == 200
+    assert "✓ 내 이벤트" in resp.text
+    with get_session() as db:
+        entry = db.exec(select(ScheduleEntry)).first()
+        assert entry is not None
+        assert entry.room_id is None
+        assert entry.timeslot_id == ts_id
+
+
+def test_event_and_conversation_coexist_same_timeslot(client, admin_client):
+    # 같은 시간대에 대화(룸 배정)와 이벤트(시간만)가 함께 등록될 수 있다
+    from app.models import ScheduleEntry
+
+    room_id, ts_id = _seed_room_and_slot(admin_client)
+    conv = _submit_topic(client, title="대화 주제 (Conv)")
+    client.post(f"/schedule/{conv}/take", data={"slot": f"{room_id}:{ts_id}"})
+    event = _submit_event(client, title="이벤트 공존 (Coexist)")
+    client.post(f"/schedule/{event}/take", data={"slot": str(ts_id)})
+
+    with get_session() as db:
+        entries = list(db.exec(select(ScheduleEntry)))
+        assert len(entries) == 2
+        assert {e.room_id for e in entries} == {room_id, None}
+        assert all(e.timeslot_id == ts_id for e in entries)
+
+    # 공개 타임테이블에 둘 다 노출 (대화 셀 + 이벤트 배너)
+    page = admin_client.get("/schedule").text
+    assert "대화 주제" in page and "이벤트 공존" in page
+
+
+def test_multiple_events_same_timeslot_allowed(client, admin_client):
+    # 한 시간대에 이벤트 여러 개 — room_id NULL 은 UNIQUE 충돌 없음
+    from app.models import ScheduleEntry
+
+    _room_id, ts_id = _seed_room_and_slot(admin_client)
+    e1 = _submit_event(client, title="이벤트 하나 (Event 1)")
+    client.post(f"/schedule/{e1}/take", data={"slot": str(ts_id)})
+    e2 = _submit_event(client, title="이벤트 둘 (Event 2)")
+    client.post(f"/schedule/{e2}/take", data={"slot": str(ts_id)})
+
+    with get_session() as db:
+        events = list(db.exec(
+            select(ScheduleEntry).where(ScheduleEntry.room_id == None)))  # noqa: E711
+        assert len(events) == 2
+
+
+def test_event_shown_on_board(client, admin_client):
+    _room_id, ts_id = _seed_room_and_slot(admin_client)
+    tid = _submit_event(client, title="전광판 이벤트 (Board event)")
+    client.post(f"/schedule/{tid}/take", data={"slot": str(ts_id)})
+
+    board = client.get("/board?date=2026-06-23").text
+    assert "전광판 이벤트" in board
+
+
+def test_admin_assigns_event_to_timeslot(client, admin_client):
+    # 관리자도 이벤트를 시간대에만 배정(slot=ts_id) — room_id NULL
+    from app.models import ScheduleEntry
+
+    _room_id, ts_id = _seed_room_and_slot(admin_client)
+    tid = _submit_event(client, title="관리자 배정 이벤트 (Admin event)")
+
+    admin_client.post(f"/admin/topics/{tid}/schedule", data={"slot": str(ts_id)})
+    with get_session() as db:
+        entry = db.exec(select(ScheduleEntry)).first()
+        assert entry is not None
+        assert entry.room_id is None
+        assert entry.timeslot_id == ts_id
 
 
 def test_non_admin_identity_blocked(client):

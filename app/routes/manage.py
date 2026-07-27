@@ -49,9 +49,13 @@ def _schedule_status(session, topic):
     entry = entry_for_topic(session, topic.id)
     children = [H2(t("타임테이블", "Timetable"))]
     if entry:
-        room = session.get(Room, entry.room_id)
         ts = session.get(Timeslot, entry.timeslot_id)
-        label = f"{room.name if room else '?'} · {ts.time_label if ts else '?'}"
+        if topic.is_event:
+            # 이벤트는 시간만 배정 — 룸 표시 없음.
+            label = ts.time_label if ts else "?"
+        else:
+            room = session.get(Room, entry.room_id)
+            label = f"{room.name if room else '?'} · {ts.time_label if ts else '?'}"
         children.append(notice(f"{t('현재 배정', 'Scheduled')}: {label}",
                                kind="success"))
     else:

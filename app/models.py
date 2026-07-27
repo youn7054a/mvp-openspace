@@ -20,6 +20,17 @@ class TopicStatus(str, Enum):
     PROPOSED = "proposed"  # 제안됨 (Proposed)
 
 
+class TopicKind(str, Enum):
+    """주제 유형 (Topic kind).
+
+    대화(Conversation)는 룸+시간(셀 하나)에 등록한다. 이벤트(Event)는 시간에만
+    등록하고 장소(룸)는 잡지 않는다 — ScheduleEntry.room_id 가 NULL 이다.
+    """
+
+    CONVERSATION = "conversation"  # 대화 — 룸+시간
+    EVENT = "event"  # 이벤트 — 시간만
+
+
 class Topic(SQLModel, table=True):
     """토론 주제 (Discussion topic)."""
 
@@ -33,6 +44,8 @@ class Topic(SQLModel, table=True):
     host_pycon_id: Optional[int] = Field(default=None, index=True)
     host_username: str = ""  # PyCon username — 기본 별명 후보 (display only)
     image_url: Optional[str] = Field(default=None)  # 주제 대표 이미지 (Topic cover image)
+    # 주제 유형 — 등록 시 고정 (대화=룸+시간 / 이벤트=시간만)
+    kind: TopicKind = Field(default=TopicKind.CONVERSATION)
     status: TopicStatus = Field(default=TopicStatus.PROPOSED)
     is_hidden: bool = Field(default=False)  # 관리자 숨김 (Admin-hidden)
     created_at: datetime = Field(default_factory=utcnow)
@@ -43,6 +56,11 @@ class Topic(SQLModel, table=True):
     def is_active(self) -> bool:
         """공개 노출 가능 여부 (Visible to the public)."""
         return self.deleted_at is None and not self.is_hidden
+
+    @property
+    def is_event(self) -> bool:
+        """이벤트 유형 여부 (Event topic — schedules to a time only, no room)."""
+        return self.kind == TopicKind.EVENT
 
     @property
     def display_host(self) -> str:
@@ -118,7 +136,9 @@ class ScheduleEntry(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     topic_id: int = Field(foreign_key="topic.id", index=True)
-    room_id: int = Field(foreign_key="room.id", index=True)
+    # 이벤트(시간만 등록)는 room_id 가 NULL. SQLite UNIQUE 는 NULL 을 서로 다른
+    # 값으로 보므로 unique(room_id, timeslot_id) 가 한 시간대 여러 이벤트를 허용한다.
+    room_id: Optional[int] = Field(default=None, foreign_key="room.id", index=True)
     timeslot_id: int = Field(foreign_key="timeslot.id", index=True)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)

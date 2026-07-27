@@ -191,13 +191,19 @@ def _builder_partial(db):
 
 
 def _admin_sched_cell(topic, entry, rooms, open_ts, taken, room_by_id, ts_by_id):
-    """주제별 타임테이블 배정 컨트롤 (Admin assign topic to a slot)."""
+    """주제별 타임테이블 배정 컨트롤 (Admin assign topic to a slot).
+
+    대화는 룸+시간(slot="room:ts"), 이벤트는 시간만(slot="ts") 배정한다.
+    """
     if topic.deleted_at is not None:
         return "—"
     if entry:
-        room = room_by_id.get(entry.room_id)
         ts = ts_by_id.get(entry.timeslot_id)
-        label = f"{room.name if room else '?'} · {ts.time_label if ts else '?'}"
+        if topic.is_event:
+            label = ts.time_label if ts else "?"
+        else:
+            room = room_by_id.get(entry.room_id)
+            label = f"{room.name if room else '?'} · {ts.time_label if ts else '?'}"
         return Div(
             Span(label, cls="sched-current"),
             Form(Button(t("배정 해제", "Unassign"), type="submit", cls="secondary"),
@@ -205,8 +211,12 @@ def _admin_sched_cell(topic, entry, rooms, open_ts, taken, room_by_id, ts_by_id)
                  style="display:inline"),
             cls="sched-cell",
         )
-    opts = [Option(f"{r.name} · {ts.time_label}", value=f"{r.id}:{ts.id}")
-            for ts in open_ts for r in rooms if (r.id, ts.id) not in taken]
+    if topic.is_event:
+        # 이벤트는 룸 없이 열린 시간대만 — 같은 시간 여러 이벤트 허용(중복 제외 안 함).
+        opts = [Option(ts.time_label, value=f"{ts.id}") for ts in open_ts]
+    else:
+        opts = [Option(f"{r.name} · {ts.time_label}", value=f"{r.id}:{ts.id}")
+                for ts in open_ts for r in rooms if (r.id, ts.id) not in taken]
     if not opts:
         return Span(t("빈 슬롯 없음", "no open slot"), cls="sched-current")
     return Form(
@@ -445,14 +455,20 @@ def register(app) -> None:
     def admin_topic_schedule(session, topic_id: int, slot: str = ""):
         if (redir := _require_admin(session)):
             return redir
-        try:
-            room_id, ts_id = (int(x) for x in slot.split(":"))
-        except (ValueError, AttributeError):
-            return RedirectResponse("/admin/topics", status_code=303)
         with get_session() as db:
             topic = db.get(Topic, topic_id)
+            if not topic or topic.deleted_at is not None:
+                return RedirectResponse("/admin/topics", status_code=303)
+            # 이벤트는 시간만(slot=ts_id), 대화는 룸+시간(slot="room:ts").
+            try:
+                if topic.is_event:
+                    room_id, ts_id = None, int(slot)
+                else:
+                    room_id, ts_id = (int(x) for x in slot.split(":"))
+            except (ValueError, AttributeError):
+                return RedirectResponse("/admin/topics", status_code=303)
             ts = db.get(Timeslot, ts_id)
-            if not topic or topic.deleted_at is not None or not ts or ts.is_closed:
+            if not ts or ts.is_closed:
                 return RedirectResponse("/admin/topics", status_code=303)
             entry = entry_for_topic(db, topic_id)
             try:

@@ -336,6 +336,28 @@ table.schedule tbody th { font-family: var(--font-mono); color: var(--ink-soft);
   text-align: center; color: var(--accent); font-family: var(--font-mono); font-size: .76rem;
   letter-spacing: .06em; background: repeating-linear-gradient(45deg, transparent, transparent 8px, rgba(245,201,61,.07) 8px, rgba(245,201,61,.07) 16px);
 }
+/* 이벤트 배너 줄 (Event banner row) — 시간만 등록, 룸 칸들 위 전체폭 */
+td.slot-event {
+  color: var(--accent); font-weight: 600;
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+}
+/* 주제 유형 선택 (Topic type) — 박스는 .image-fields 재사용, 라디오만 가로 */
+.kind-options { display: flex; flex-direction: row; align-items: center; gap: 1.4rem; margin-bottom: .7rem; }
+.kind-option {
+  display: inline-flex; align-items: center; gap: .45rem; cursor: pointer;
+  font-family: var(--font-mono); font-size: .8rem; line-height: 1;
+}
+.kind-option input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--primary); }
+.kind-option .kind-name { line-height: 1; }
+/* 유형 배지 (Kind badge) — 대화 / 이벤트 */
+.kind-badge {
+  display: inline-block; font-family: var(--font-mono); font-size: .58rem;
+  letter-spacing: .04em; padding: .12rem .4rem; border-radius: 999px;
+  vertical-align: middle; line-height: 1.4;
+}
+.kind-badge.is-event { color: var(--background); background: var(--accent); }
+.kind-badge.is-conversation { color: var(--primary); border: 1px solid var(--primary); }
 /* 내 주제 관리: 클릭형 타임테이블 (Manage page interactive timetable) */
 .schedule-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: .4rem 0 1rem; }
 .schedule-hint { color: var(--ink-soft); font-family: var(--font-mono); font-size: .76rem; margin: .2rem 0 .6rem; }
@@ -554,6 +576,10 @@ body.board .content {
 /* 닫힌 슬롯 카드 (Keynote/break) */
 .board-closed { border-color: var(--accent); box-shadow: 0 0 16px var(--accent-soft); align-items: center; justify-content: center; text-align: center; }
 .board-closed .title { color: var(--accent); font-size: clamp(1rem, 2.6vh, 2rem); line-height: 1.3; }
+/* 이벤트 배너 카드 (Event banner) — 룸 카드들 위 전체폭, 시간만 등록 */
+.board-events { display: flex; flex-direction: column; gap: .6vh; margin-bottom: .6vh; }
+.board-event { border-color: var(--accent); box-shadow: 0 0 14px var(--accent-soft); }
+.board-event .board-event-tag { color: var(--accent); }
 .board-empty { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; font-size: 3vh; color: var(--ink-soft); }
 /* 전광판 본문: 타임테이블(왼쪽) + QR 사이드바(오른쪽) 가로 분할 */
 .board-body { flex: 1 1 auto; min-height: 0; display: flex; gap: 1.5vw; }
