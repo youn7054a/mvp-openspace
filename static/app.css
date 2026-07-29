@@ -488,18 +488,90 @@ ul { padding-left: 1.1rem; }
 li { margin-bottom: .6rem; }
 
 /* ============================================================
-   전광판 (Display board) — 풀 네온, 한 화면에 맞춤 (NO SCROLL)
+   전광판 (Display board) — 밝은 장소용 고대비 테마, 한 화면에 맞춤 (NO SCROLL)
    타임슬롯 수(--rows)에 따라 행 높이·글자가 자동 축소된다.
    ============================================================ */
 body.board {
+  /* 전광판만 흰 바탕 + 검은 글씨로 고정해 밝은 장소에서도 읽기 쉽게 한다. */
+  --background: #fff;
+  --foreground: #111;
+  --primary: #111;
+  --accent: #111;
+  --card: #fff;
+  --muted: #f5f5f5;
+  --border: #222;
+  --primary-soft: transparent;
+  --accent-soft: transparent;
+  --ink-soft: #333;
+
   margin: 0; height: 100vh; overflow: hidden;     /* 스크롤 금지 (no scroll) */
-  color: var(--foreground); font-family: var(--font-body);
-  background-color: var(--background);
-  background-image: radial-gradient(50rem 30rem at 50% 0, var(--primary-soft), transparent 70%);
+  color: var(--foreground); font-family: var(--font-body); font-weight: 700;
+  background: var(--background);
 }
 body.board .content {
   max-width: 100%; height: 100vh; padding: 2.2vh 2.4vw 2.6vh;
   display: flex; flex-direction: column; gap: 1vh;
+}
+
+/* 일반 테이블형 전광판 — 페이지 전체를 밝은 고대비로 표시하고 세로 스크롤을 허용한다. */
+body.board2 {
+  --background: #fff;
+  --foreground: #111;
+  --primary: #111;
+  --accent: #111;
+  --card: #fff;
+  --secondary: #f0f0f0;
+  --muted: #f5f5f5;
+  --border: #222;
+  --primary-soft: transparent;
+  --accent-soft: #e8e8e8;
+  --ink-soft: #333;
+
+  margin: 0; min-height: 100vh; color: var(--foreground);
+  font-family: var(--font-body); font-weight: 700; background: var(--background);
+}
+body.board2 .board2-content {
+  width: 100%; max-width: none; height: 100vh; margin: 0; padding: 1.5vh 1.5vw;
+}
+body.board2 #board2-live { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+body.board2 #board2-live > h1 {
+  flex: 0 0 auto; margin: 0 0 1vh; font-size: clamp(1.4rem, 3.5vh, 2.6rem);
+}
+body.board2 .board2-body { flex: 1 1 auto; min-height: 0; display: flex; gap: 1.5vw; }
+body.board2 .board2-body > .daytabs,
+body.board2 .board2-body > .daytabs-single { flex: 1 1 auto; min-width: 0; }
+body.board2 .daytabs { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+body.board2 .daytabs .day-panels { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+body.board2 .daytabs .day-panel,
+body.board2 .daytabs-single { height: 100%; min-height: 0; flex-direction: column; }
+body.board2 .daytabs-single { flex: 1 1 auto; display: flex; }
+body.board2 .schedule-scroll { flex: 1 1 auto; min-height: 0; margin: 0; overflow: auto; }
+body.board2 table.schedule { height: 100%; table-layout: fixed; }
+body.board2 table.schedule { border-color: #111; }
+body.board2 table.schedule th,
+body.board2 table.schedule td { border-color: #222; }
+body.board2 .slot-filled { color: #111; text-shadow: none; }
+body.board2 .slot-open { color: #444; }
+body.board2 table.schedule td.slot-filled {
+  white-space: normal; overflow: visible; text-overflow: clip;
+}
+body.board2 .slot-title {
+  font-size: clamp(.9rem, 2.1vh, 1.45rem); font-weight: 700; line-height: 1.45;
+}
+body.board2 .slot-description {
+  margin-top: .45rem; color: #333; font-size: clamp(.78rem, 1.65vh, 1.08rem);
+  font-weight: 400; line-height: 1.45;
+  white-space: pre-wrap; word-break: keep-all; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+body.board2 td.slot-filled.has-image {
+  position: relative; background-color: #fff; background-position: center; background-size: cover;
+}
+body.board2 td.slot-filled.has-image::before {
+  content: ""; position: absolute; inset: 0; background: rgba(255,255,255,.76); pointer-events: none;
+}
+body.board2 td.slot-filled.has-image .slot-content {
+  position: relative; z-index: 1;
 }
 /* HTMX 폴링 컨테이너 — head + board-body 를 담는 내부 플렉스 컬럼 */
 #board-live {
@@ -511,8 +583,8 @@ body.board .content {
 }
 .board-title {
   margin: 0; color: var(--primary); line-height: 1.4;
-  font-family: var(--font-pixel); font-size: clamp(1rem, 3.2vh, 2rem);
-  text-shadow: 0 0 12px var(--primary), 0 0 28px var(--primary-soft);
+  font-family: var(--font-pixel); font-size: clamp(1rem, 3.2vh, 2rem); font-weight: 700;
+  text-shadow: none;
 }
 /* 날짜 탭 (Date tabs) */
 .board-dates { display: flex; flex-wrap: wrap; gap: .5vw; }
@@ -524,7 +596,7 @@ body.board .content {
 .board-date:hover { color: var(--foreground); text-decoration: none; }
 .board-date.is-active {
   color: var(--accent); border-color: var(--accent);
-  box-shadow: 0 0 8px var(--accent-soft); text-shadow: 0 0 6px var(--accent-soft);
+  box-shadow: none; text-shadow: none;
 }
 
 /* 타임슬롯 행들이 가중치대로 높이를 나눔 (세션 행은 높게, 빈 행은 낮게) */
@@ -535,7 +607,7 @@ body.board .content {
 .board-section h2 {
   flex: 0 0 auto; margin: 0 0 .5vh; font-family: var(--font-mono);
   color: var(--accent); text-transform: uppercase; letter-spacing: .06em;
-  text-shadow: 0 0 10px var(--accent-soft);
+  text-shadow: none; font-weight: 700;
   font-size: clamp(.6rem, 1.5vh, 1rem);
 }
 /* 한 슬롯 안의 카드들이 가로 폭을 균등 분할 */
@@ -547,38 +619,37 @@ body.board .content {
   min-height: 0; overflow: hidden; display: flex; flex-direction: column;
   justify-content: flex-start; gap: .4vh;
   background: var(--card); border: 2px solid var(--primary); border-radius: 8px;
-  padding: 1vh 1vw; box-shadow: 0 0 14px var(--primary-soft);
+  padding: 1vh 1vw; box-shadow: none;
 }
 .board-session .room {
   flex: 0 0 auto; font-family: var(--font-mono); color: var(--accent);
-  font-size: clamp(.5rem, 1.05vh, .72rem);
+  font-size: clamp(.5rem, 1.05vh, .72rem); font-weight: 700;
 }
 .board-session .title {
   /* 조밀한 본문 픽셀폰트 + 작은 크기로 좁은 카드에서도 제목이 다 보이게 */
   font-family: var(--font-body); color: var(--foreground); line-height: 1.3;
   word-break: keep-all; overflow: hidden;
-  font-size: clamp(.6rem, 1.4vh, 1rem);
+  font-size: clamp(.6rem, 1.4vh, 1rem); font-weight: 700;
   display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical;
 }
-/* 사진이 있는 세션: 배경 이미지 + 어두운 오버레이 (no extra height) */
+/* 사진은 은은하게 남기고 흰 오버레이로 검은 글씨 대비를 보장한다. */
 .board-session.has-image { background-size: cover; background-position: center; position: relative; }
 .board-session.has-image::before {
   content: ""; position: absolute; inset: 0; border-radius: 6px;
-  background: linear-gradient(to top,
-    rgba(20,10,31,.94) 0%, rgba(20,10,31,.62) 55%, rgba(20,10,31,.4) 100%);
+  background: rgba(255,255,255,.82);
 }
 .board-session.has-image .room,
-.board-session.has-image .title { position: relative; z-index: 1; text-shadow: 0 1px 5px rgba(0,0,0,.85); }
+.board-session.has-image .title { position: relative; z-index: 1; }
 /* 빈 슬롯 카드 (Open/empty slot) — 차분하게, 채워진 세션이 돋보이도록 */
-.board-open { border: 2px dashed var(--border); box-shadow: none; background: rgba(255,255,255,.02); }
+.board-open { border: 2px dashed var(--border); box-shadow: none; background: #fff; }
 .board-open .room { color: var(--ink-soft); }
-.board-open-title { color: #6f6088 !important; font-family: var(--font-mono) !important; }
+.board-open-title { color: var(--ink-soft) !important; font-family: var(--font-mono) !important; }
 /* 닫힌 슬롯 카드 (Keynote/break) */
-.board-closed { border-color: var(--accent); box-shadow: 0 0 16px var(--accent-soft); align-items: center; justify-content: center; text-align: center; }
+.board-closed { border-color: var(--accent); box-shadow: none; align-items: center; justify-content: center; text-align: center; }
 .board-closed .title { color: var(--accent); font-size: clamp(1rem, 2.6vh, 2rem); line-height: 1.3; }
 /* 이벤트 배너 카드 (Event banner) — 룸 카드들 위 전체폭, 시간만 등록 */
 .board-events { display: flex; flex-direction: column; gap: .6vh; margin-bottom: .6vh; }
-.board-event { border-color: var(--accent); box-shadow: 0 0 14px var(--accent-soft); }
+.board-event { border-color: var(--accent); box-shadow: none; }
 .board-event .board-event-tag { color: var(--accent); }
 .board-empty { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; font-size: 3vh; color: var(--ink-soft); }
 /* 전광판 본문: 타임테이블(왼쪽) + QR 사이드바(오른쪽) 가로 분할 */
@@ -596,7 +667,7 @@ body.board .content {
 }
 .board-qr-cap {
   font-family: var(--font-mono); font-size: clamp(.7rem, 1.6vh, 1.05rem);
-  color: var(--foreground); text-align: center; line-height: 1.4;
+  color: var(--foreground); text-align: center; line-height: 1.4; font-weight: 700;
 }
 
 /* 어드민 전광판 QR 등록 (Admin board-QR forms) */

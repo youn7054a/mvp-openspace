@@ -241,11 +241,13 @@ def lang_toggle():
 
 
 def layout(title: str, *content, auto_refresh: int | None = None,
-           chrome: bool = True, active: str | None = None, main_cls: str = "content"):
+           chrome: bool = True, active: str | None = None, main_cls: str = "content",
+           body_cls: str | None = None):
     """표준 페이지 레이아웃 (Standard page layout).
 
     chrome=False 면 헤더/푸터 없는 전광판용 풀스크린 레이아웃.
     active: 현재 경로 (nav 강조). main_cls: <main> 추가 클래스 (페이지별 레이아웃).
+    body_cls: 페이지 전용 body 클래스. 생략 시 chrome 설정에 맞는 기본 클래스를 쓴다.
     """
     body_children = []
     if chrome:
@@ -255,7 +257,7 @@ def layout(title: str, *content, auto_refresh: int | None = None,
         body_children.append(site_footer())
     return Html(
         page_head(title, auto_refresh=auto_refresh),
-        Body(*body_children, cls="board" if not chrome else "app"),
+        Body(*body_children, cls=body_cls or ("board" if not chrome else "app")),
         lang=get_lang(),
     )
 
@@ -326,12 +328,15 @@ def topic_card(topic, *, scheduled_label: str | None = None):
 
 
 def schedule_table(rooms, timeslots, slots, topics, *, events=None,
-                   empty_notice=None):
+                   empty_notice=None, show_descriptions: bool = False,
+                   show_background_images: bool = False):
     """룸×타임슬롯 격자 표 (Room×timeslot grid table).
 
     slots: (room_id, timeslot_id) -> ScheduleEntry. topics: id -> Topic.
     events: timeslot_id -> [Topic] (시간만 등록된 이벤트). 룸 칸들 위에 전체폭
     배너 줄로 표시한다. 닫힌 슬롯은 라벨을 전체 열에 표시, 빈 칸은 '비어있음'.
+    show_descriptions=True 이면 배정된 세션의 설명을 최대 두 줄로 함께 표시한다.
+    show_background_images=True 이면 세션 대표 이미지를 셀 배경으로 표시한다.
     """
     if not rooms or not timeslots:
         return empty_notice or notice(t(
@@ -361,7 +366,19 @@ def schedule_table(rooms, timeslots, slots, topics, *, events=None,
             entry = slots.get((room.id, ts.id))
             topic = topics.get(entry.topic_id) if entry else None
             if topic and topic.is_active:
-                cells.append(Td(topic.title, cls="slot-filled", title=topic.title))
+                cell_children = [Div(topic.title, cls="slot-title")]
+                if show_descriptions and topic.description:
+                    cell_children.append(Div(topic.description, cls="slot-description"))
+                cell_content = Div(*cell_children, cls="slot-content")
+                cls = "slot-filled"
+                attrs = {}
+                url = topic.image_url
+                # CSS 주입을 막기 위해 전광판 카드와 같은 안전한 URL만 배경으로 사용한다.
+                if (show_background_images and url
+                        and not any(ch in url for ch in "'\")\\ \n\t")):
+                    cls += " has-image"
+                    attrs["style"] = f"background-image:url('{url}')"
+                cells.append(Td(cell_content, cls=cls, title=topic.title, **attrs))
             else:
                 cells.append(Td(t("— 비어있음", "— open"), cls="slot-open"))
         rows.append(Tr(*cells))
@@ -403,7 +420,7 @@ def day_caption(iso: str, suffix: str | None = None):
 
 def date_tabs(days, render_day, *, id_prefix: str, default_day: str | None = None,
               caption_suffix: str | None = None,
-              choose_label: str | None = None):
+              choose_label: str | None = None, panel_display: str = "block"):
     """순수 CSS 라디오 날짜 탭 (Pure-CSS date tabs, no JS).
 
     HTMX 패널 스왑·정적 렌더 어디서나 동작한다. 각 날짜 표 위에는 그 날짜를
@@ -411,6 +428,8 @@ def date_tabs(days, render_day, *, id_prefix: str, default_day: str | None = Non
 
     days: 정렬된 ISO 날짜 문자열 목록. render_day(day_iso) -> 그 날의 본문.
     id_prefix: 라디오 name/id 접두사 (페이지 내 유일해야 함).
+    panel_display: 선택된 날짜 패널의 display 값. 전광판처럼 남는 높이를
+        채워야 하는 레이아웃에서는 "flex"를 넘긴다.
     """
     if choose_label is None:
         choose_label = t("날짜를 선택하세요:", "Choose a day:")
@@ -435,7 +454,7 @@ def date_tabs(days, render_day, *, id_prefix: str, default_day: str | None = Non
         ))
         # 선택된 라디오에 해당하는 패널만 표시 (show only the checked day's panel).
         rules.append(
-            f"#{rid}:checked ~ .day-panels .day-panel[data-i='{i}']{{display:block}}"
+            f"#{rid}:checked ~ .day-panels .day-panel[data-i='{i}']{{display:{panel_display}}}"
         )
     return Div(
         *radios,

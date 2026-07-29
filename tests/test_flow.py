@@ -638,6 +638,36 @@ def test_board_renders(client):
     assert "전광판" in resp.text
 
 
+def test_board2_renders_table_timetable(client, admin_client):
+    room_id, timeslot_id = _seed_room_and_slot(admin_client)
+    topic_id = _submit_topic(client, title="설명 포함 세션")
+    admin_client.post(f"/admin/topics/{topic_id}/schedule",
+                      data={"slot": f"{room_id}:{timeslot_id}"})
+    with get_session() as db:
+        topic = db.get(Topic, topic_id)
+        topic.description = "전광판에서 두 줄까지 표시할 세션 설명입니다."
+        topic.image_url = "https://example.com/board2-cover.png"
+        db.add(topic)
+        db.commit()
+    resp = client.get("/board2")
+    assert resp.status_code == 200
+    assert "전광판 시간표" in resp.text
+    assert 'class="schedule"' in resp.text
+    assert "Room A" in resp.text
+    assert "전광판에서 두 줄까지 표시할 세션 설명입니다." in resp.text
+    assert "https://example.com/board2-cover.png" in resp.text
+    assert 'hx-get="/board2/live"' in resp.text
+
+
+def test_board2_shows_registered_qr(client, admin_client):
+    admin_client.post("/admin/board/qr/1", data={
+        "image_url": "https://example.com/board2-qr.png", "caption": "행사 안내",
+    })
+    page = client.get("/board2").text
+    assert "https://example.com/board2-qr.png" in page
+    assert "행사 안내" in page
+
+
 def test_board_shows_full_timetable(client, admin_client):
     # 전광판은 시간과 무관하게 전체 타임테이블의 모든 배정 세션을 카드로 표시
     room_id, ts_id = _seed_room_and_slot(admin_client)

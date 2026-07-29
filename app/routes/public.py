@@ -1,4 +1,4 @@
-"""공개 페이지 (Public pages): /, /topics, /topics/new, /schedule, /board."""
+"""공개 페이지 (Public pages): /, /topics, /topics/new, /schedule, /board, /board2."""
 from __future__ import annotations
 
 from fasthtml.common import (
@@ -758,6 +758,22 @@ def register(app) -> None:
         # 전체 페이지는 한 번만 로드 — 이후 board-live 가 스스로 폴링하여 갱신
         return layout(t("전광판", "Display Board"), _board_live(date), chrome=False)
 
+    @app.get("/board2")
+    def board2():
+        """밝은 장소에서 보기 좋은 읽기 전용 테이블형 전광판 시간표."""
+        return layout(
+            t("전광판 시간표", "Board Timetable"),
+            _board2_live(),
+            chrome=False,
+            main_cls="content board2-content",
+            body_cls="board2",
+        )
+
+    @app.get("/board2/live")
+    def board2_live():
+        # 전체 페이지를 다시 불러오지 않고 테이블만 주기적으로 갱신한다.
+        return _board2_live()
+
     @app.get("/board/live")
     def board_live(date: str = ""):
         # HTMX 폴링 대상 — board-live div 만 반환해 outerHTML 로 교체(깜빡임 없음)
@@ -841,6 +857,45 @@ def _board_live(date: str):
         head, board_body,
         id="board-live",
         hx_get=f"/board/live?date={selected}",
+        hx_trigger="every 45s",
+        hx_target="this",
+        hx_swap="outerHTML",
+    )
+
+
+def _board2_live():
+    """테이블형 전광판 본문 — 45초마다 일정 데이터만 갱신한다."""
+    with get_session() as session:
+        rooms = all_rooms(session)
+        timeslots = all_timeslots(session)
+        slots = schedule_map(session)
+        topics = topics_by_id(session)
+        events = events_by_timeslot(session)
+        qrs = board_qrs(session)
+
+    if not rooms or not timeslots:
+        body = schedule_table(rooms, timeslots, slots, topics, events=events)
+    else:
+        days = sorted({ts.starts_at.date().isoformat() for ts in timeslots})
+
+        def render_day(day: str):
+            day_timeslots = [ts for ts in timeslots
+                             if ts.starts_at.date().isoformat() == day]
+            return schedule_table(rooms, day_timeslots, slots, topics, events=events,
+                                  show_descriptions=True, show_background_images=True)
+
+        body = date_tabs(days, render_day, id_prefix="b2day", panel_display="flex")
+
+    body_children = [body]
+    qr_side = _board_qr_strip(qrs)
+    if qr_side is not None:
+        body_children.append(qr_side)
+
+    return Div(
+        H1(t("전광판 시간표", "Board Timetable")),
+        Div(*body_children, cls="board2-body"),
+        id="board2-live",
+        hx_get="/board2/live",
         hx_trigger="every 45s",
         hx_target="this",
         hx_swap="outerHTML",
