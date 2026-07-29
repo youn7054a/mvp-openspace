@@ -550,8 +550,15 @@ body.board2 table.schedule { height: 100%; table-layout: fixed; }
 body.board2 table.schedule { border-color: #111; }
 body.board2 table.schedule th,
 body.board2 table.schedule td { border-color: #222; }
+body.board2 table.schedule thead th { text-align: center; vertical-align: middle; }
 body.board2 .slot-filled { color: #111; text-shadow: none; }
-body.board2 .slot-open { color: #444; }
+body.board2 .slot-open { color: #444; text-align: center; vertical-align: middle; }
+body.board2 td.slot-closed,
+body.board2 td.slot-event {
+  text-align: center; vertical-align: middle; font-size: clamp(.95rem, 2vh, 1.35rem);
+}
+body.board2 td.slot-event { font-weight: 700; }
+body.board2 table.schedule tbody th { text-align: center; vertical-align: middle; }
 body.board2 table.schedule td.slot-filled {
   white-space: normal; overflow: visible; text-overflow: clip;
 }

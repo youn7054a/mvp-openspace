@@ -882,7 +882,10 @@ def _board2_live():
             day_timeslots = [ts for ts in timeslots
                              if ts.starts_at.date().isoformat() == day]
             return schedule_table(rooms, day_timeslots, slots, topics, events=events,
-                                  show_descriptions=True, show_background_images=True)
+                                  show_descriptions=True, show_background_images=True,
+                                  merge_event_time=True,
+                                  open_label=t("비어있습니다. 열린공간 주제를 넣어주세요!",
+                                               "Open — add an OpenSpace topic!"))
 
         body = date_tabs(days, render_day, id_prefix="b2day", panel_display="flex")
 

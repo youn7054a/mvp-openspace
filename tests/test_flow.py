@@ -640,9 +640,12 @@ def test_board_renders(client):
 
 def test_board2_renders_table_timetable(client, admin_client):
     room_id, timeslot_id = _seed_room_and_slot(admin_client)
+    admin_client.post("/admin/rooms", data={"name": "Room B", "sort_order": "1"})
     topic_id = _submit_topic(client, title="설명 포함 세션")
     admin_client.post(f"/admin/topics/{topic_id}/schedule",
                       data={"slot": f"{room_id}:{timeslot_id}"})
+    event_id = _submit_event(client, title="동시간 이벤트")
+    admin_client.post(f"/admin/topics/{event_id}/schedule", data={"slot": str(timeslot_id)})
     with get_session() as db:
         topic = db.get(Topic, topic_id)
         topic.description = "전광판에서 두 줄까지 표시할 세션 설명입니다."
@@ -656,6 +659,9 @@ def test_board2_renders_table_timetable(client, admin_client):
     assert "Room A" in resp.text
     assert "전광판에서 두 줄까지 표시할 세션 설명입니다." in resp.text
     assert "https://example.com/board2-cover.png" in resp.text
+    assert "동시간 이벤트" in resp.text
+    assert 'rowspan="2"' in resp.text
+    assert "비어있습니다. 열린공간 주제를 넣어주세요!" in resp.text
     assert 'hx-get="/board2/live"' in resp.text
 
 

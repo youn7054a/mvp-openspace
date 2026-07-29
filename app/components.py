@@ -329,7 +329,8 @@ def topic_card(topic, *, scheduled_label: str | None = None):
 
 def schedule_table(rooms, timeslots, slots, topics, *, events=None,
                    empty_notice=None, show_descriptions: bool = False,
-                   show_background_images: bool = False):
+                   show_background_images: bool = False,
+                   merge_event_time: bool = False, open_label: str | None = None):
     """룸×타임슬롯 격자 표 (Room×timeslot grid table).
 
     slots: (room_id, timeslot_id) -> ScheduleEntry. topics: id -> Topic.
@@ -337,6 +338,8 @@ def schedule_table(rooms, timeslots, slots, topics, *, events=None,
     배너 줄로 표시한다. 닫힌 슬롯은 라벨을 전체 열에 표시, 빈 칸은 '비어있음'.
     show_descriptions=True 이면 배정된 세션의 설명을 최대 두 줄로 함께 표시한다.
     show_background_images=True 이면 세션 대표 이미지를 셀 배경으로 표시한다.
+    merge_event_time=True 이면 이벤트와 같은 시간대의 시간 칸을 세로로 병합한다.
+    open_label: 빈 슬롯에 표시할 안내 문구. 생략 시 기본 문구를 표시한다.
     """
     if not rooms or not timeslots:
         return empty_notice or notice(t(
@@ -348,20 +351,23 @@ def schedule_table(rooms, timeslots, slots, topics, *, events=None,
     rows = []
     for ts in timeslots:
         # 이벤트(시간만 등록)는 룸 칸들 위 전체폭 배너 줄로 — 여러 개면 여러 줄.
-        for ev in events.get(ts.id, []):
-            rows.append(Tr(
-                Th(ts.time_label, scope="row"),
-                Td(Span(t("이벤트", "Event"), cls="kind-badge is-event"),
-                   " ", ev.title, colspan=len(rooms), cls="slot-event",
-                   title=ev.title),
-            ))
+        slot_events = events.get(ts.id, [])
+        merge_time_cell = merge_event_time and bool(slot_events)
+        for i, ev in enumerate(slot_events):
+            cells = []
+            if not merge_time_cell or i == 0:
+                time_attrs = {"rowspan": len(slot_events) + 1} if merge_time_cell else {}
+                cells.append(Th(ts.time_label, scope="row", **time_attrs))
+            cells.append(Td(Span(t("이벤트", "Event"), cls="kind-badge is-event"),
+                            " ", ev.title, colspan=len(rooms), cls="slot-event",
+                            title=ev.title))
+            rows.append(Tr(*cells))
         if ts.is_closed:
-            rows.append(Tr(
-                Th(ts.time_label, scope="row"),
-                Td(ts.closed_label, colspan=len(rooms), cls="slot-closed"),
-            ))
+            cells = [] if merge_time_cell else [Th(ts.time_label, scope="row")]
+            cells.append(Td(ts.closed_label, colspan=len(rooms), cls="slot-closed"))
+            rows.append(Tr(*cells))
             continue
-        cells = [Th(ts.time_label, scope="row")]
+        cells = [] if merge_time_cell else [Th(ts.time_label, scope="row")]
         for room in rooms:
             entry = slots.get((room.id, ts.id))
             topic = topics.get(entry.topic_id) if entry else None
@@ -380,7 +386,7 @@ def schedule_table(rooms, timeslots, slots, topics, *, events=None,
                     attrs["style"] = f"background-image:url('{url}')"
                 cells.append(Td(cell_content, cls=cls, title=topic.title, **attrs))
             else:
-                cells.append(Td(t("— 비어있음", "— open"), cls="slot-open"))
+                cells.append(Td(open_label or t("— 비어있음", "— open"), cls="slot-open"))
         rows.append(Tr(*cells))
     # 좁은 화면에서 가로 스크롤 (mobile: scroll wide tables instead of overflow).
     return Div(Table(Thead(header), *rows, cls="schedule"), cls="schedule-scroll")
