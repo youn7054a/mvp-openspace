@@ -792,7 +792,7 @@ def test_seed_demo_data(client, admin_client):
         assert len(filled) == cell_count // 2
 
     # 공개 화면에 데모 데이터가 보임 (demo data visible publicly)
-    assert "파이썬 타입 힌트" in client.get("/topics").text
+    assert "파이썬으로 자동화한 귀찮은 일" in client.get("/topics").text
     schedule = client.get("/schedule").text
     assert "1번 테이블" in schedule
     assert "키노트" in schedule and "점심 및 휴식" in schedule
@@ -801,7 +801,7 @@ def test_seed_demo_data(client, admin_client):
 
     # 전광판: 절반만 배정했으므로 빈 슬롯도 함께 표시된다.
     board = client.get("/board").text
-    assert "파이썬 타입 힌트" in board       # 배정된 세션
+    assert "파이썬으로 자동화한 귀찮은 일" in board  # 배정된 세션
     assert "비어있음" in board
 
     # 다시 시드하면 교체(중복 없음) — 여전히 테이블 7개 (re-seed replaces, no dupes)
