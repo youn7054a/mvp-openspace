@@ -332,6 +332,12 @@ table.schedule thead th { background: var(--secondary); font-family: var(--font-
 table.schedule tbody th { font-family: var(--font-mono); color: var(--ink-soft); }
 .slot-open { color: #6f6088; }
 .slot-filled { color: var(--primary); text-shadow: 0 0 6px var(--primary-soft); }
+table.schedule .slot-title { font-weight: 700; line-height: 1.35; word-break: keep-all; }
+table.schedule .slot-description {
+  margin-top: .3rem; color: var(--ink-soft); font-size: .72rem; line-height: 1.4;
+  white-space: pre-wrap; word-break: keep-all; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
 .slot-closed {
   text-align: center; color: var(--accent); font-family: var(--font-mono); font-size: .76rem;
   letter-spacing: .06em; background: repeating-linear-gradient(45deg, transparent, transparent 8px, rgba(245,201,61,.07) 8px, rgba(245,201,61,.07) 16px);
@@ -361,15 +367,16 @@ td.slot-event {
 /* 내 주제 관리: 클릭형 타임테이블 (Manage page interactive timetable) */
 .schedule-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: .4rem 0 1rem; }
 .schedule-hint { color: var(--ink-soft); font-family: var(--font-mono); font-size: .76rem; margin: .2rem 0 .6rem; }
+.sched-pick-desc { margin: .35rem 0 0; color: var(--ink-soft); font-size: .86rem; }
 table.manage-schedule td { text-align: center; vertical-align: middle; padding: .45rem; }
 .slot-tag { font-family: var(--font-mono); font-size: .72rem; letter-spacing: .04em; }
 td.slot-mine { background: var(--primary-soft); }
 td.slot-mine .slot-tag { color: var(--primary); text-shadow: 0 0 6px var(--primary-soft); }
 td.slot-taken { color: #6f6088; }
 td.slot-open { padding: .35rem; }
-/* 긴 제목 줄임표 (truncate long titles in slot cells) */
+/* 타임테이블 칸에는 프로그램 제목과 설명을 함께 표시한다. */
 table.schedule td.slot-filled {
-  max-width: 12rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 12rem; white-space: normal; overflow: hidden; text-overflow: clip;
 }
 td.slot-mine .slot-tag {
   display: inline-block; max-width: 11rem; vertical-align: bottom;

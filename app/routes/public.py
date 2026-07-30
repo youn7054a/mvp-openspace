@@ -276,15 +276,24 @@ SCHED_ID = "sched-interactive"
 
 
 def _sched_slot_cell(tid, room, ts, entry, current_entry, *, schedulable,
-                     mine_title=""):
+                     topics, mine_title="", mine_description=""):
     """타임테이블 한 칸 — 내 자리/사용 중/빈 칸. 빈 칸은 눌러 등록·이동."""
     is_mine = current_entry and entry and entry.id == current_entry.id
     if is_mine:
         # 내 자리엔 ✓ + 주제 제목을 표시 (어떤 주제가 잡혔는지 바로 보이게).
         label = f"✓ {mine_title}" if mine_title else t("✓ 내 주제", "✓ My topic")
-        return Td(Span(label, cls="slot-tag", title=mine_title or None),
+        children = [Div(label, cls="slot-title", title=mine_title or None)]
+        if mine_description:
+            children.append(Div(mine_description, cls="slot-description"))
+        return Td(*children,
                   cls="slot-mine", aria_label=t("현재 내 자리", "My current slot"))
     if entry:
+        scheduled_topic = topics.get(entry.topic_id)
+        if scheduled_topic:
+            children = [Div(scheduled_topic.title, cls="slot-title")]
+            if scheduled_topic.description:
+                children.append(Div(scheduled_topic.description, cls="slot-description"))
+            return Td(*children, cls="slot-taken", title=scheduled_topic.title)
         return Td(Span(t("사용 중", "Taken"), cls="slot-tag"), cls="slot-taken")
     if not schedulable:
         return Td(Span(t("비어있음", "Open"), cls="slot-tag"), cls="slot-open")
@@ -299,7 +308,7 @@ def _sched_slot_cell(tid, room, ts, entry, current_entry, *, schedulable,
 
 
 def _sched_grid(rooms, timeslots, taken, tid, current_entry, *, schedulable,
-                mine_title=""):
+                topics, mine_title="", mine_description=""):
     header = Tr(Th(t("시간 / 룸", "Time / Room")), *[Th(r.name) for r in rooms])
     rows = []
     for ts in timeslots:
@@ -312,7 +321,8 @@ def _sched_grid(rooms, timeslots, taken, tid, current_entry, *, schedulable,
             entry = taken.get((room.id, ts.id))
             cells.append(_sched_slot_cell(tid, room, ts, entry, current_entry,
                                           schedulable=schedulable,
-                                          mine_title=mine_title))
+                                          topics=topics, mine_title=mine_title,
+                                          mine_description=mine_description))
         rows.append(Tr(*cells))
     return Div(Table(Thead(header), *rows, cls="schedule manage-schedule"),
                cls="schedule-scroll")
@@ -358,6 +368,7 @@ def _sched_interactive(db, topic, *, admin_override: bool = False):
     entry = entry_for_topic(db, topic.id)
     rooms = all_rooms(db)
     timeslots = all_timeslots(db)
+    topics = topics_by_id(db)
     children = []
 
     # 이벤트는 룸이 없어도 시간만 있으면 등록 가능 — 룸 필요는 대화에만.
@@ -411,7 +422,8 @@ def _sched_interactive(db, topic, *, admin_override: bool = False):
             return _sched_event_grid(day_slots, tid, entry,
                                      schedulable=schedulable)
         return _sched_grid(rooms, day_slots, taken, tid, entry,
-                           schedulable=schedulable, mine_title=topic.title)
+                           schedulable=schedulable, topics=topics,
+                           mine_title=topic.title, mine_description=topic.description)
 
     children.append(date_tabs(days, render_day, id_prefix="sday-i",
                               default_day=default_day))
@@ -450,6 +462,7 @@ def _owner_schedule_area(db, my_topics, selected_id, *, admin_override: bool = F
             t("빈 칸을 눌러 자리를 잡으세요.", "Click an open cell to place it."))
     return Div(
         heading,
+        P(selected.description or t("(설명 없음)", "(No description)"), cls="sched-pick-desc"),
         P(hint, cls="form-hint"),
         Div(*chips, cls="sched-chips") if len(my_topics) > 1 else None,
         _sched_interactive(db, selected, admin_override=admin_override),
@@ -561,19 +574,40 @@ def register(app) -> None:
         with get_session() as db:
             topics = active_topics(db)
             slots = schedule_map(db)
-            # topic_id -> 슬롯 라벨
+            # topic_id -> (정렬 시각, 테이블 순서, 배정 정보)
             rooms = {r.id: r for r in all_rooms(db)}
             timeslots = {t.id: t for t in all_timeslots(db)}
-            scheduled: dict[int, str] = {}
+            scheduled: dict[int, tuple[datetime, int, str]] = {}
             for (room_id, ts_id), entry in slots.items():
                 room = rooms.get(room_id)
                 ts = timeslots.get(ts_id)
                 if room and ts:
-                    scheduled[entry.topic_id] = f"{room.name} · {ts.time_label}"
+                    scheduled[entry.topic_id] = (
+                        ts.starts_at,
+                        room.sort_order,
+                        f"{ts.starts_at:%Y.%m.%d} · {ts.time_label} · {room.name}",
+                    )
+            # 시간만 배정하는 이벤트도 배정된 주제로 취급해 날짜·시간 순으로 함께 표시.
+            for ts_id, event_topics in events_by_timeslot(db).items():
+                ts = timeslots.get(ts_id)
+                if ts:
+                    for event_topic in event_topics:
+                        scheduled[event_topic.id] = (
+                            ts.starts_at,
+                            -1,
+                            f"{ts.starts_at:%Y.%m.%d} · {ts.time_label} · {t('이벤트', 'Event')}",
+                        )
+
+            # 배정된 주제 우선 → 날짜 → 시간 → 테이블 순. 미배정 주제는 기존 생성순 유지.
+            indexed_topics = list(enumerate(topics))
+            indexed_topics.sort(key=lambda item: (
+                0, scheduled[item[1].id][0], scheduled[item[1].id][1], item[1].id
+            ) if item[1].id in scheduled else (1, item[0], 0, 0))
+            topics = [topic for _, topic in indexed_topics]
 
             cards = [
                 topic_card(tp, scheduled_label=(
-                    f"{t('배정됨', 'Scheduled')}: {scheduled[tp.id]}"
+                    f"{t('배정됨', 'Scheduled')}: {scheduled[tp.id][2]}"
                     if tp.id in scheduled else None
                 ))
                 for tp in topics
@@ -673,14 +707,16 @@ def register(app) -> None:
             topics = topics_by_id(db)
             events = events_by_timeslot(db)
         if not rooms or not timeslots:
-            body = schedule_table(rooms, timeslots, slots, topics, events=events)
+            body = schedule_table(rooms, timeslots, slots, topics, events=events,
+                                  show_descriptions=True)
         else:
             days = sorted({ts.starts_at.date().isoformat() for ts in timeslots})
 
             def render_day(day: str):
                 day_ts = [ts for ts in timeslots
                           if ts.starts_at.date().isoformat() == day]
-                return schedule_table(rooms, day_ts, slots, topics, events=events)
+                return schedule_table(rooms, day_ts, slots, topics, events=events,
+                                      show_descriptions=True)
 
             body = date_tabs(days, render_day, id_prefix="sday")
         return layout(

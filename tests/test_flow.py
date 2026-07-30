@@ -322,14 +322,40 @@ def test_admin_can_schedule_topic(client, admin_client):
         e = db.exec(select(ScheduleEntry).where(
             ScheduleEntry.topic_id == topic_id)).first()
     assert e is not None and e.room_id == room_id and e.timeslot_id == ts_id
-    # 비소유자(admin, 자기 주제 없음) 읽기전용 표에 제목 노출
-    assert "관리자 배정 주제" in admin_client.get("/schedule").text
+    # 비소유자(admin, 자기 주제 없음) 읽기전용 표에 제목과 설명 모두 노출
+    schedule_page = admin_client.get("/schedule").text
+    assert "관리자 배정 주제" in schedule_page
+    assert "설명 (desc)" in schedule_page
 
     # 관리자가 배정 해제 (admin unassigns)
     admin_client.post(f"/admin/topics/{topic_id}/unschedule")
     with get_session() as db:
         assert db.exec(select(ScheduleEntry).where(
             ScheduleEntry.topic_id == topic_id)).first() is None
+
+
+def test_topic_list_sorts_scheduled_cards_by_date_time_and_table(client, admin_client):
+    admin_client.post("/admin/rooms", data={"name": "2번 테이블", "sort_order": "1"})
+    admin_client.post("/admin/rooms", data={"name": "1번 테이블", "sort_order": "0"})
+    admin_client.post("/admin/timeslots", data={
+        "date": "2026-08-15", "start_time": "13:30",
+        "slot_minutes": "40", "break_minutes": "0", "count": "2"})
+    first_id = _submit_topic(client, title="먼저 진행되는 주제")
+    second_id = _submit_topic(client, title="나중에 진행되는 주제", email="second@example.com")
+    _submit_topic(client, title="아직 미배정 주제", email="open@example.com")
+    with get_session() as db:
+        rooms = {room.name: room for room in db.exec(select(Room))}
+        slots = list(db.exec(select(Timeslot).order_by(Timeslot.starts_at)))
+    # 먼저 시간대의 1번 테이블, 다음 시간대의 2번 테이블로 배정.
+    admin_client.post(f"/admin/topics/{first_id}/schedule",
+                      data={"slot": f"{rooms['1번 테이블'].id}:{slots[0].id}"})
+    admin_client.post(f"/admin/topics/{second_id}/schedule",
+                      data={"slot": f"{rooms['2번 테이블'].id}:{slots[1].id}"})
+
+    page = client.get("/topics").text
+    assert page.index("먼저 진행되는 주제") < page.index("나중에 진행되는 주제")
+    assert page.index("나중에 진행되는 주제") < page.index("아직 미배정 주제")
+    assert "2026.08.15 · 13:30–14:10 · 1번 테이블" in page
 
 
 def test_admin_schedule_rejects_double_booking(client, admin_client):

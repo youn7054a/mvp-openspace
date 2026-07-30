@@ -358,8 +358,13 @@ def schedule_table(rooms, timeslots, slots, topics, *, events=None,
             if not merge_time_cell or i == 0:
                 time_attrs = {"rowspan": len(slot_events) + 1} if merge_time_cell else {}
                 cells.append(Th(ts.time_label, scope="row", **time_attrs))
-            cells.append(Td(Span(t("이벤트", "Event"), cls="kind-badge is-event"),
-                            " ", ev.title, colspan=len(rooms), cls="slot-event",
+            event_children = [
+                Div(Span(t("이벤트", "Event"), cls="kind-badge is-event"),
+                    " ", ev.title, cls="slot-title"),
+            ]
+            if show_descriptions and ev.description:
+                event_children.append(Div(ev.description, cls="slot-description"))
+            cells.append(Td(*event_children, colspan=len(rooms), cls="slot-event",
                             title=ev.title))
             rows.append(Tr(*cells))
         if ts.is_closed:
