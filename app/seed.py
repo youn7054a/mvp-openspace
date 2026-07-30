@@ -71,44 +71,58 @@ def wipe_all(session: Session) -> None:
 def seed_demo(session: Session) -> dict[str, int]:
     """기존 데이터를 비우고 데모 데이터를 채운다 (wipe + seed).
 
-    룸 5개, 타임슬롯 8개(첫 칸은 키노트로 닫힘)를 만들고, 열린 칸(룸×열린 슬롯)을
-    모두 채우도록 칸 수만큼 주제를 생성·배정한다(전 세션 가득 채움).
+    행사일(2026-08-15, 2026-08-16)별로 오전 키노트·점심 휴식과 1번~7번 테이블의
+    40분 진행/20분 휴식 시간표를 만든다. 열린 테이블×시간 칸의 절반만 주제로 채워
+    배정 가능한 빈 자리를 함께 보여준다.
     """
     wipe_all(session)
 
-    # 룸 (Rooms) 5개
-    rooms = [Room(name=name, sort_order=i)
-             for i, name in enumerate(
-                 ["Track A", "Track B", "Track C", "Track D", "Track E"])]
+    # 공간 (Rooms): 실제 열린공간 테이블 1번~7번
+    rooms = [Room(name=f"{i}번 테이블", sort_order=i - 1) for i in range(1, 8)]
     session.add_all(rooms)
     session.commit()
     for r in rooms:
         session.refresh(r)
 
-    # 타임슬롯 (Timeslots) 8개: 45분 슬롯 + 15분 휴식, 첫 칸은 키노트로 닫음
-    base = datetime(2026, 9, 12, 10, 0)
+    # 타임슬롯 (Timeslots): 양일 오전 키노트 2회, 점심·휴식, 오후 열린공간 4회.
+    # 마지막 회차는 16:30–17:10 (입력된 15:10은 40분 진행 규칙에 맞춰 보정).
     slots: list[Timeslot] = []
-    cursor = base
-    for i in range(8):
-        end = cursor + timedelta(minutes=45)
-        ts = Timeslot(starts_at=cursor, ends_at=end, sort_order=i)
-        if i == 0:
-            ts.is_closed = True
-            ts.label = "키노트 (Keynote)"
-        slots.append(ts)
-        cursor = end + timedelta(minutes=15)
+    for day_index, day in enumerate(((2026, 8, 15), (2026, 8, 16))):
+        morning_slots = [
+            (datetime(*day, 9, 50), datetime(*day, 10, 30), "키노트 (Keynote)"),
+            (datetime(*day, 10, 50), datetime(*day, 11, 30), "키노트 (Keynote)"),
+            (datetime(*day, 11, 30), datetime(*day, 13, 30), "점심 및 휴식 (Lunch & Break)"),
+        ]
+        for slot_index, (starts_at, ends_at, label) in enumerate(morning_slots):
+            slots.append(Timeslot(
+                starts_at=starts_at,
+                ends_at=ends_at,
+                sort_order=day_index * 7 + slot_index,
+                is_closed=True,
+                label=label,
+            ))
+        cursor = datetime(*day, 13, 30)
+        for slot_index in range(4):
+            end = cursor + timedelta(minutes=40)
+            slots.append(Timeslot(
+                starts_at=cursor,
+                ends_at=end,
+                sort_order=day_index * 7 + 3 + slot_index,
+            ))
+            cursor = end + timedelta(minutes=20)
     session.add_all(slots)
     session.commit()
     for t in slots:
         session.refresh(t)
 
-    # 열린 칸 (open cells) = 열린 슬롯 × 룸 — 이 칸들을 모두 채운다
+    # 열린 칸 (open cells) = 열린 슬롯 × 테이블. 데모에서는 절반만 배정한다.
     open_slots = [t for t in slots if not t.is_closed]
     open_pairs = [(r.id, ts.id) for ts in open_slots for r in rooms]
+    scheduled_pairs = open_pairs[::2]
 
-    # 주제 (Topics): 칸 수만큼 생성. 템플릿을 순환하되 제목 중복은 번호로 구분.
+    # 주제 (Topics): 배정할 칸 수만큼 생성. 템플릿을 순환하되 제목 중복은 번호로 구분.
     topics: list[Topic] = []
-    for i in range(len(open_pairs)):
+    for i in range(len(scheduled_pairs)):
         title, nick, desc, img = DEMO_TOPICS[i % len(DEMO_TOPICS)]
         repeat = i // len(DEMO_TOPICS)
         if repeat:  # 두 바퀴째부터는 제목에 번호를 붙여 중복 방지
@@ -123,11 +137,11 @@ def seed_demo(session: Session) -> dict[str, int]:
     for t in topics:
         session.refresh(t)
 
-    # 배정 (Schedule): 모든 열린 칸을 빠짐없이 채운다 (every open cell filled)
-    for topic, (room_id, ts_id) in zip(topics, open_pairs):
+    # 배정 (Schedule): 열린 칸의 절반만 채워 빈 슬롯도 표시한다.
+    for topic, (room_id, ts_id) in zip(topics, scheduled_pairs):
         session.add(ScheduleEntry(topic_id=topic.id, room_id=room_id,
                                   timeslot_id=ts_id))
-    scheduled = len(open_pairs)
+    scheduled = len(scheduled_pairs)
 
     # 이벤트(시간만 등록) 데모 — 룸 없이 열린 시간대에 배너로 표시(대화와 공존).
     events: list[Topic] = []

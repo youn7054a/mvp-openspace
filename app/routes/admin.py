@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time as dtime, timedelta
+from urllib.parse import urlparse
 
 from fasthtml.common import (
     A,
@@ -38,11 +39,11 @@ from starlette.datastructures import UploadFile
 from ..components import field, layout, notice
 from ..database import get_session
 from ..i18n import t
-from ..models import BoardQR, Room, ScheduleEntry, Timeslot, Topic, utcnow
+from ..models import AutoBoardURL, BoardQR, Room, ScheduleEntry, Timeslot, Topic, utcnow
 from ..queries import (
-    BOARD_QR_SLOTS,
     all_rooms,
     all_timeslots,
+    auto_board_urls,
     board_qrs,
     entry_for_topic,
     schedule_map,
@@ -64,6 +65,7 @@ def _admin_layout(title, *content):
         A(t("룸", "Rooms"), href="/admin/rooms", cls="nav-link"), " · ",
         A(t("타임슬롯", "Timeslots"), href="/admin/timeslots", cls="nav-link"), " · ",
         A(t("전광판 QR", "Board QR"), href="/admin/board", cls="nav-link"), " · ",
+        A(t("자동 전광판", "Auto Board"), href="/admin/auto-board", cls="nav-link"), " · ",
         A(t("← 사이트로", "← Site"), href="/", cls="nav-link"),
         cls="admin-nav",
     )
@@ -255,12 +257,18 @@ def _qr_form(slot: int, qr):
                   required=False), cls="field"),
         Button(t("저장", "Save"), type="submit"),
     ]
-    return Section(
+    children = [
         H2(f"QR {slot}"),
         Form(*inner, method="post", action=f"/admin/board/qr/{slot}",
              enctype="multipart/form-data", cls="qr-form"),
-        cls="qr-block",
-    )
+    ]
+    if qr:
+        children.append(Form(
+            Button(t("QR 삭제", "Delete QR"), type="submit", cls="danger"),
+            method="post", action=f"/admin/board/qr/{slot}/delete",
+            onsubmit=f"return confirm('{t('이 QR을 삭제할까요?', 'Delete this QR?')}')",
+        ))
+    return Section(*children, cls="qr-block")
 
 
 def _demo_section():
@@ -418,7 +426,12 @@ def register(app) -> None:
         ) if rows else notice(t("주제가 없습니다.", "No topics."))
         return _admin_layout(t("주제 모더레이션", "Topic Moderation"),
                              _demo_section(),
-                             H2(t("주제", "Topics")), table)
+                             H2(t("주제", "Topics")),
+                             P(t("관리자는 참가자 자가등록 기간과 관계없이 모든 열린 날짜의 "
+                                 "타임슬롯에 주제를 배정할 수 있습니다.",
+                                 "Admins can assign topics to any open date regardless of the "
+                                 "participant self-scheduling window."), cls="field-help"),
+                             table)
 
     # ---- 데모 데이터 (Demo data seeding) ----
     @app.post("/admin/seed")
@@ -660,11 +673,13 @@ def register(app) -> None:
         return _admin_layout(
             t("전광판 QR", "Board QR"),
             H2(t("전광판 QR 코드", "Display-board QR")),
-            P(t("전광판 하단에 노출할 QR 코드 2개를 등록합니다. 각 QR에 이미지와 설명을 "
+            P(t("전광판에 노출할 QR 코드를 필요한 만큼 등록합니다. 각 QR에 이미지와 설명을 "
                 "넣을 수 있어요. 이미지가 없는 QR은 전광판에 표시되지 않습니다.",
-                "Register up to two QR codes shown at the bottom of the board."),
+                "Register as many QR codes as needed. QR codes without an image are hidden."),
               cls="field-help"),
-            Div(*[_qr_form(s, qrs.get(s)) for s in BOARD_QR_SLOTS], cls="qr-grid"),
+            Div(*[
+                _qr_form(slot, qrs.get(slot)) for slot in sorted(qrs)
+            ], _qr_form(max(qrs, default=0) + 1, None), cls="qr-grid"),
         )
 
     @app.post("/admin/board/qr/{slot}")
@@ -673,7 +688,7 @@ def register(app) -> None:
                                   image_file: UploadFile = None):
         if (redir := _require_admin(session)):
             return redir
-        if slot not in BOARD_QR_SLOTS:
+        if slot < 1:
             return RedirectResponse("/admin/board", status_code=303)
         # 이미지: 업로드 우선, 없으면 URL (uploaded file wins, else pasted URL)
         try:
@@ -700,6 +715,109 @@ def register(app) -> None:
             db.add(qr)
             db.commit()
         return RedirectResponse("/admin/board", status_code=303)
+
+    @app.post("/admin/board/qr/{slot}/delete")
+    def admin_board_qr_delete(session, slot: int):
+        if (redir := _require_admin(session)):
+            return redir
+        with get_session() as db:
+            qr = db.exec(select(BoardQR).where(BoardQR.slot == slot)).first()
+            if qr:
+                delete_local_image(qr.image_url)
+                db.delete(qr)
+                db.commit()
+        return RedirectResponse("/admin/board", status_code=303)
+
+    # ---- 자동 전광판 URL (Auto-rotating board URLs) ----
+    @app.get("/admin/auto-board")
+    def admin_auto_board(session):
+        if (redir := _require_admin(session)):
+            return redir
+        with get_session() as db:
+            urls = auto_board_urls(db)
+        rows = [
+            Tr(
+                Td(item.sort_order),
+                Td(item.label or "—"),
+                Td(A(item.url, href=item.url, target="_blank", rel="noreferrer")),
+                Td(f"{item.display_seconds}{t('초', 's')}"),
+                Td(Form(
+                    Button(t("삭제", "Delete"), type="submit", cls="danger"),
+                    method="post", action=f"/admin/auto-board/{item.id}/delete",
+                    style="display:inline",
+                )),
+            )
+            for item in urls
+        ] or [Tr(Td(t("등록된 URL이 없습니다.", "No URLs configured."), colspan=5))]
+        return _admin_layout(
+            t("자동 전광판", "Auto Board"),
+            H2(t("자동 전광판 URL", "Auto Board URLs")),
+            P(t("등록 순서대로 URL을 전환해 표시합니다. /board 또는 /board2 같은 내부 주소와 "
+                "http/https 주소를 등록할 수 있습니다.",
+                "URLs rotate in order. Add internal paths such as /board or /board2, or http/https URLs."),
+              cls="field-help"),
+            P(A(t("자동 전광판 열기", "Open Auto Board"), href="/auto-board",
+                target="_blank", cls="btn secondary")),
+            Form(
+                field(t("표시 이름", "Label"), "label", required=False,
+                      placeholder=t("예: 열린공간 시간표", "e.g. OpenSpace timetable")),
+                field(t("URL", "URL"), "url", placeholder="/board2"),
+                field(t("표시 시간(초)", "Display seconds"), "display_seconds", value="30",
+                      input_type="number"),
+                field(t("정렬 순서", "Sort order"), "sort_order", value="0", input_type="number",
+                      required=False),
+                Button(t("URL 추가", "Add URL"), type="submit"),
+                method="post", action="/admin/auto-board",
+            ),
+            H2(t("등록된 URL", "Configured URLs")),
+            Table(
+                Thead(Tr(Th(t("순서", "Order")), Th(t("이름", "Label")), Th("URL"),
+                          Th(t("표시 시간", "Duration")), Th(t("관리", "Manage")))),
+                Tbody(*rows), cls="schedule",
+            ),
+        )
+
+    @app.post("/admin/auto-board")
+    def admin_auto_board_create(session, url: str, label: str = "", display_seconds: int = 30,
+                                sort_order: int = 0):
+        if (redir := _require_admin(session)):
+            return redir
+        clean_url = (url or "").strip()
+        parsed = urlparse(clean_url)
+        is_internal = clean_url.startswith("/") and not clean_url.startswith("//")
+        is_http_url = parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+        if not (is_internal or is_http_url):
+            return _admin_layout(
+                t("자동 전광판", "Auto Board"),
+                notice(t("/로 시작하는 내부 주소 또는 http/https URL을 입력하세요.",
+                         "Enter an internal path starting with / or an http/https URL."), kind="error"),
+                A(t("돌아가기", "Back"), href="/admin/auto-board", cls="btn secondary"),
+            )
+        if not 5 <= display_seconds <= 3600:
+            return _admin_layout(
+                t("자동 전광판", "Auto Board"),
+                notice(t("표시 시간은 5초에서 3,600초 사이여야 합니다.",
+                         "Display duration must be between 5 and 3,600 seconds."), kind="error"),
+                A(t("돌아가기", "Back"), href="/admin/auto-board", cls="btn secondary"),
+            )
+        with get_session() as db:
+            db.add(AutoBoardURL(
+                url=clean_url, label=(label or "").strip(), display_seconds=display_seconds,
+                sort_order=sort_order,
+            ))
+            db.commit()
+        return RedirectResponse("/admin/auto-board", status_code=303)
+
+    @app.post("/admin/auto-board/{item_id}/delete")
+    def admin_auto_board_delete(session, item_id: int):
+        if (redir := _require_admin(session)):
+            return redir
+        with get_session() as db:
+            item = db.get(AutoBoardURL, item_id)
+            if item:
+                db.delete(item)
+                db.commit()
+        return RedirectResponse("/admin/auto-board", status_code=303)
 
     # ---- 룸 관리 (Room management) ----
     @app.get("/admin/rooms")

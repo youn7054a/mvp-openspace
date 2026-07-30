@@ -534,9 +534,14 @@ body.board2 .board2-content {
   width: 100%; max-width: none; height: 100vh; margin: 0; padding: 1.5vh 1.5vw;
 }
 body.board2 #board2-live { height: 100%; display: flex; flex-direction: column; min-height: 0; }
-body.board2 #board2-live > h1 {
+body.board2 #board2-live > .board2-head { flex: 0 0 auto; margin: 0 0 1vh; }
+body.board2 #board2-live > .board2-head h1 {
   flex: 0 0 auto; margin: 0 0 1vh; font-size: clamp(1.4rem, 3.5vh, 2.6rem);
 }
+body.board2 .board2-location {
+  margin: 0; font-size: clamp(.85rem, 1.8vh, 1.2rem); color: #333; line-height: 1.4;
+}
+body.board2 .board2-location-name { font-weight: 700; color: #111; }
 body.board2 .board2-body { flex: 1 1 auto; min-height: 0; display: flex; gap: 1.5vw; }
 body.board2 .board2-body > .daytabs,
 body.board2 .board2-body > .daytabs-single { flex: 1 1 auto; min-width: 0; }
@@ -579,6 +584,18 @@ body.board2 td.slot-filled.has-image::before {
 }
 body.board2 td.slot-filled.has-image .slot-content {
   position: relative; z-index: 1;
+}
+
+/* 자동 전광판 (Auto board) — 등록된 URL을 전체화면 iframe으로 순환 표시 */
+body.auto-board { margin: 0; width: 100vw; height: 100vh; overflow: hidden; background: #000; }
+body.auto-board .auto-board-content {
+  position: fixed; inset: 0; width: 100vw; max-width: none; height: 100vh; margin: 0; padding: 0;
+}
+.auto-board-player { position: fixed; inset: 0; width: 100vw; height: 100vh; }
+.auto-board-frame { display: block; width: 100%; height: 100%; border: 0; }
+.auto-board-empty {
+  display: grid; place-items: center; width: 100%; height: 100%; padding: 2rem;
+  color: #111; font-family: var(--font-body); background: #fff; text-align: center;
 }
 /* HTMX 폴링 컨테이너 — head + board-body 를 담는 내부 플렉스 컬럼 */
 #board-live {
@@ -663,13 +680,13 @@ body.board2 td.slot-filled.has-image .slot-content {
 .board-body { flex: 1 1 auto; min-height: 0; display: flex; gap: 1.5vw; }
 /* QR 은 오른쪽 세로 사이드바로 노출 — 타임테이블 높이에 영향 없음 */
 .board-qr {
-  flex: 0 0 auto; display: flex; flex-direction: column;
-  justify-content: center; align-items: center; gap: 2.5vh;
-  width: clamp(9rem, 15vw, 15rem);
+  flex: 0 0 auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: center; align-items: center; gap: 2vh 1vw;
+  width: clamp(12rem, 22vw, 22rem); max-height: 100%; overflow-y: auto;
 }
 .board-qr-item { display: flex; flex-direction: column; align-items: center; gap: .8vh; max-width: 100%; }
 .board-qr-img {
-  width: clamp(7rem, 12vw, 12rem); height: auto; max-height: 34vh; object-fit: contain;
+  width: min(100%, clamp(5rem, 9vw, 10rem)); height: auto; max-height: 28vh; object-fit: contain;
   background: #fff; padding: .8vh; border-radius: 8px; border: 1px solid var(--border);
 }
 .board-qr-cap {
