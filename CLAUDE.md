@@ -115,8 +115,10 @@ Can:
 - Create time slots (bulk generator: date / start / length / break / count)
 - Lay out the whole grid in the Timetable Builder (add/edit/delete rows & columns inline)
 - Close slots with a custom label (e.g. 키노트, 휴식) — closed slots are not bookable
-- Assign / unassign topics to slots
-- Register display-board QR codes (2 slots: image + caption)
+- Assign / unassign topics to slots (conversation = room + time, event = time only)
+- View the applicant email in `/admin/topics` for operational contact; it is never public
+- Register any number of display-board QR codes (image + caption), in display order
+- Register multiple board URLs for automatic rotation at `/auto-board`
 - Hide topics
 - Delete topics
 - Seed or clear demo data (one click)
@@ -209,7 +211,8 @@ several), each linking to `/manage/{topic_id}`.
 
 ### /topics
 
-주제 목록 (Topic List) — public sticker wall.
+주제 목록 (Topic List) — public sticker wall. Scheduled cards appear first, ordered by
+date, time, and table, and show their assignment; applicant emails are not rendered.
 
 ### /topics/new
 
@@ -227,7 +230,9 @@ has completed.
 타임테이블 (Timetable) — public read-only. With `?topic={id}` (an owned topic) it
 becomes **interactive for that topic** (owner-only): click an open cell to register/
 move (POST `/schedule/{topic_id}/take`), cancel via `/schedule/{topic_id}/cancel`.
-The 2-day scheduling window applies (see Timetable Rule 3).
+Topics and their descriptions are visible in occupied cells. Time-only events appear
+alongside the table at their assigned time. The 2-day scheduling window applies (see
+Timetable Rule 3).
 
 ### /schedule/own
 
@@ -239,6 +244,17 @@ owned topic (`?topic={id}`); used when switching topics via chips on the timetab
 전광판 (Display Board) — full timetable as cards, no-scroll, optional `?date=` day
 selector. The page shell loads once and self-polls `GET /board/live` every 45s
 (HTMX `outerHTML` swap — flicker-free, replaces the old meta-refresh).
+
+### /board2
+
+Table-format 열린공간 시간표 (Open Space timetable) display. It shows the venue,
+date, room columns, topic descriptions, and the administrator-registered QR strip,
+and is designed to fill a display without scrolling.
+
+### /auto-board
+
+Full-screen player that cycles through administrator-registered board URLs in their
+configured order and display duration.
 
 ---
 
@@ -267,7 +283,8 @@ Functions:
 
 ### /admin/topics
 
-Topic moderation + assign topics to slots + seed/clear demo data
+Topic moderation + applicant email (admin-only) + assign topics to slots + seed/clear
+demo data. Applicant email must not appear on public pages or boards.
 
 ### /admin/timetable
 
@@ -286,8 +303,14 @@ Timeslot management — bulk generate, close/relabel/reopen slots
 
 ### /admin/board
 
-전광판 QR (Board QR) — register the QR codes (2 slots) shown at the bottom of the
-display board (image upload / URL + caption — e.g. event info, survey link).
+전광판 QR (Board QR) — register, edit, and delete any number of QR codes shown in a
+vertical strip on the display board (image upload / URL + caption — e.g. event info,
+survey link).
+
+### /admin/auto-board
+
+Automatic board URL management — add and remove URLs with a label, display duration,
+and order.
 
 ---
 
@@ -295,7 +318,7 @@ display board (image upload / URL + caption — e.g. event info, survey link).
 
 ## Rule 1
 
-One topic can occupy:
+One conversation topic can occupy:
 
 text 0 or 1 slot
 
@@ -303,9 +326,12 @@ text 0 or 1 slot
 
 ## Rule 2
 
-One slot can contain:
+One room-and-timeslot cell can contain:
 
 text 0 or 1 topic
+
+An event topic is assigned to a timeslot only and therefore does not occupy a room
+cell. It can be shown together with conversations scheduled in that same timeslot.
 
 ---
 
@@ -344,10 +370,11 @@ A closed slot (custom label, e.g. 키노트/휴식) accepts no topic.
 
 ## Topic
 
-text id title description host_name(nickname, optional) host_email host_pycon_id(owner key) host_username image_url status is_hidden created_at updated_at deleted_at
+text id title description host_name(nickname, optional) host_email host_pycon_id(owner key) host_username image_url kind(conversation|event) status is_hidden created_at updated_at deleted_at
 
 `host_pycon_id` (PyCon member id) is the stable ownership key; `host_email` is for
-contact/display only (may change). Adding this column to an existing
+administrator contact only (may change) and is never public. `kind` determines
+whether the item needs a room (`conversation`) or only a time (`event`). Adding this column to an existing
 SQLite DB needs a fresh DB or manual `ALTER TABLE` (create_all won't alter).
 
 ---
@@ -366,10 +393,18 @@ text id starts_at ends_at sort_order is_closed label created_at updated_at
 
 ## BoardQR
 
-text id slot(1|2) image_url caption created_at updated_at
+text id slot(display order) image_url caption created_at updated_at
 
-Display-board QR codes — one row per slot (`unique(slot)`). Rendered as a QR strip
-at the bottom of `/board` (event info, survey, sponsor links, …).
+Display-board QR codes — one row per display order (`unique(slot)`). Rendered as a
+vertical QR strip (event info, survey, sponsor links, …).
+
+---
+
+## AutoBoardURL
+
+text id url label display_seconds sort_order created_at updated_at
+
+URLs shown sequentially by `/auto-board`.
 
 ---
 
@@ -520,9 +555,12 @@ Code comments and docstrings stay in the original `한글 (English)` bilingual f
 
 ## Email Privacy
 
-Never expose:
+Never expose on public pages, public timetable, or display boards:
 
 text host_email
+
+`/admin/topics` is the sole exception: an authenticated allowlisted administrator
+may view an applicant email to contact the submitter.
 
 publicly.
 
@@ -586,7 +624,7 @@ Display board (`/board`, `/board?date=YYYY-MM-DD`):
 
 - Auto refresh every 45 seconds via HTMX self-polling of `/board/live` (flicker-free
   `outerHTML` swap; date selection persists across refresh)
-- QR strip at the bottom (admin-registered BoardQR codes, up to 2)
+- QR strip at the bottom (admin-registered BoardQR codes, any number)
 - Show the WHOLE timetable as cards, grouped by timeslot
 - Show empty slots too (비어있음/open) so attendees see open times
 - Closed slots shown as labeled cards (키노트, 휴식, …)
@@ -594,6 +632,10 @@ Display board (`/board`, `/board?date=YYYY-MM-DD`):
 - Date selector tabs when the event spans multiple days
 - Topic image shown as card background; full titles visible
 - Large typography, projector friendly
+
+`/board2` is the table-format Open Space timetable board. It shows venue and date,
+topic descriptions, events, and QR codes while fitting the screen without scrolling.
+`/auto-board` cycles configured URLs full-screen.
 
 ---
 

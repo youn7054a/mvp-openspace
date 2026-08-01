@@ -413,6 +413,7 @@ def register(app) -> None:
                 rows.append(Tr(
                     Td(tp.title),
                     Td(tp.display_host),
+                    Td(tp.host_email),
                     Td(state_label),
                     Td(_admin_sched_cell(tp, entry_by_topic.get(tp.id), rooms,
                                          open_ts, taken, room_by_id, ts_by_id)),
@@ -420,6 +421,7 @@ def register(app) -> None:
                 ))
         table = Table(
             Thead(Tr(Th(t("제목", "Title")), Th(t("제안자", "Host")),
+                     Th(t("신청자 이메일", "Applicant email")),
                      Th(t("상태", "Status")), Th(t("타임테이블", "Schedule")),
                      Th(t("작업", "Actions")))),
             *rows, cls="schedule",

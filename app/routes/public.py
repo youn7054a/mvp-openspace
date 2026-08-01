@@ -308,7 +308,7 @@ def _sched_slot_cell(tid, room, ts, entry, current_entry, *, schedulable,
 
 
 def _sched_grid(rooms, timeslots, taken, tid, current_entry, *, schedulable,
-                topics, mine_title="", mine_description=""):
+                topics, events, mine_title="", mine_description=""):
     header = Tr(Th(t("시간 / 룸", "Time / Room")), *[Th(r.name) for r in rooms])
     rows = []
     for ts in timeslots:
@@ -316,7 +316,24 @@ def _sched_grid(rooms, timeslots, taken, tid, current_entry, *, schedulable,
             rows.append(Tr(Th(ts.time_label, scope="row"),
                            Td(ts.closed_label, colspan=len(rooms), cls="slot-closed")))
             continue
-        cells = [Th(ts.time_label, scope="row")]
+        # 이벤트는 룸을 점유하지 않지만, 같은 시간대에 무엇이 열리는지 보여준다.
+        slot_events = events.get(ts.id, [])
+        for i, event_topic in enumerate(slot_events):
+            event_cells = []
+            if i == 0:
+                event_cells.append(Th(ts.time_label, scope="row",
+                                      rowspan=len(slot_events) + 1))
+            event_children = [
+                Div(Span(t("이벤트", "Event"), cls="kind-badge is-event"),
+                    " ", event_topic.title, cls="slot-title"),
+            ]
+            if event_topic.description:
+                event_children.append(Div(event_topic.description, cls="slot-description"))
+            event_cells.append(Td(*event_children, colspan=len(rooms), cls="slot-event",
+                                  title=event_topic.title))
+            rows.append(Tr(*event_cells))
+
+        cells = [] if slot_events else [Th(ts.time_label, scope="row")]
         for room in rooms:
             entry = taken.get((room.id, ts.id))
             cells.append(_sched_slot_cell(tid, room, ts, entry, current_entry,
@@ -369,6 +386,7 @@ def _sched_interactive(db, topic, *, admin_override: bool = False):
     rooms = all_rooms(db)
     timeslots = all_timeslots(db)
     topics = topics_by_id(db)
+    events = events_by_timeslot(db)
     children = []
 
     # 이벤트는 룸이 없어도 시간만 있으면 등록 가능 — 룸 필요는 대화에만.
@@ -422,7 +440,7 @@ def _sched_interactive(db, topic, *, admin_override: bool = False):
             return _sched_event_grid(day_slots, tid, entry,
                                      schedulable=schedulable)
         return _sched_grid(rooms, day_slots, taken, tid, entry,
-                           schedulable=schedulable, topics=topics,
+                           schedulable=schedulable, topics=topics, events=events,
                            mine_title=topic.title, mine_description=topic.description)
 
     children.append(date_tabs(days, render_day, id_prefix="sday-i",

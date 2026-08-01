@@ -334,6 +334,17 @@ def test_admin_can_schedule_topic(client, admin_client):
             ScheduleEntry.topic_id == topic_id)).first() is None
 
 
+def test_admin_topics_shows_applicant_email_only_to_admin(client, admin_client):
+    _submit_topic(client, title="이메일 확인 주제", email="applicant@example.com")
+
+    admin_page = admin_client.get("/admin/topics").text
+    assert "신청자 이메일" in admin_page
+    assert "applicant@example.com" in admin_page
+
+    public_page = client.get("/topics").text
+    assert "applicant@example.com" not in public_page
+
+
 def test_topic_list_sorts_scheduled_cards_by_date_time_and_table(client, admin_client):
     admin_client.post("/admin/rooms", data={"name": "2번 테이블", "sort_order": "1"})
     admin_client.post("/admin/rooms", data={"name": "1번 테이블", "sort_order": "0"})
@@ -898,6 +909,18 @@ def test_event_schedules_to_timeslot_only(client, admin_client):
         assert entry is not None
         assert entry.room_id is None
         assert entry.timeslot_id == ts_id
+
+
+def test_event_is_visible_in_conversation_scheduling_timetable(client, admin_client):
+    room_id, ts_id = _seed_room_and_slot(admin_client)
+    event_id = _submit_event(client, title="함께 보는 이벤트")
+    admin_client.post(f"/admin/topics/{event_id}/schedule", data={"slot": str(ts_id)})
+    conversation_id = _submit_topic(client, title="자리 잡기 주제", email="conversation@example.com")
+
+    page = client.get(f"/schedule?topic={conversation_id}").text
+    assert "함께 보는 이벤트" in page
+    assert "이벤트 설명 (event desc)" in page
+    assert f'"slot": "{room_id}:{ts_id}"' in page
 
 
 def test_event_and_conversation_coexist_same_timeslot(client, admin_client):
