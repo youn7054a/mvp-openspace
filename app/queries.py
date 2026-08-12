@@ -5,10 +5,7 @@ from datetime import date, timedelta
 
 from sqlmodel import Session, select
 
-from .models import BoardQR, Room, ScheduleEntry, Timeslot, Topic
-
-# 전광판 QR 슬롯 (Display-board QR slots) — 고정 2자리
-BOARD_QR_SLOTS = (1, 2)
+from .models import AutoBoardURL, BoardQR, Room, ScheduleEntry, Timeslot, Topic
 
 # 참가자 타임테이블 등록이 열리는 시점 (Self-scheduling opens) — 행사 시작 N일 전부터.
 # 행사 시작 = 가장 이른 타임슬롯 날짜. 그 전까지는 참가자 자가 등록을 막는다
@@ -107,8 +104,15 @@ def get_owned_topic(session: Session, topic_id: int, identity) -> Topic | None:
 
 
 def board_qrs(session: Session) -> dict[int, BoardQR]:
-    """전광판 QR 슬롯 매핑 (slot -> BoardQR). 없는 슬롯은 누락."""
+    """전광판 QR 슬롯 매핑 (slot -> BoardQR). 슬롯 수는 제한하지 않는다."""
     return {q.slot: q for q in session.exec(select(BoardQR))}
+
+
+def auto_board_urls(session: Session) -> list[AutoBoardURL]:
+    """자동 전광판 URL을 관리자가 지정한 순서대로 반환한다."""
+    return list(session.exec(
+        select(AutoBoardURL).order_by(AutoBoardURL.sort_order, AutoBoardURL.id)
+    ))
 
 
 def event_start_date(session: Session) -> date | None:

@@ -253,9 +253,39 @@ def test_scheduling_locked_until_two_days_before(client, admin_client):
     # 관리자는 윈도우와 무관하게 배정 가능 (admin override, PRD)
     with get_session() as db:
         tid = db.exec(select(Topic)).first().id
+    admin_page = admin_client.get("/admin/topics").text
+    assert "모든 열린 날짜" in admin_page
     admin_client.post(f"/admin/topics/{tid}/schedule", data={"slot": f"{room_id}:{ts_id}"})
     with get_session() as db:
         assert db.exec(select(ScheduleEntry)).first() is not None
+
+
+def test_admin_can_self_schedule_from_user_timetable_before_window(admin_client):
+    """관리자도 /schedule 사용자 UI에서 날짜 제한 없이 자신의 주제를 배정한다."""
+    from app.models import ScheduleEntry
+
+    admin_client.post("/admin/rooms", data={"name": "Room A", "sort_order": "0"})
+    admin_client.post("/admin/timeslots", data={
+        "date": "2026-12-25", "start_time": "10:00",
+        "slot_minutes": "45", "break_minutes": "0", "count": "1"})
+    topic_page = admin_client.post("/topics/new", data={
+        "title": "관리자 사용자 화면 등록 주제", "host_name": "관리자",
+    })
+    assert "주제가 등록되었습니다" in topic_page.text
+    with get_session() as db:
+        room = db.exec(select(Room)).first()
+        slot = db.exec(select(Timeslot)).first()
+        topic = db.exec(select(Topic).where(
+            Topic.title == "관리자 사용자 화면 등록 주제")).first()
+
+    page = admin_client.get("/schedule").text
+    assert "관리자 권한으로 날짜 제한 없이" in page
+    assert "이 자리 잡기" in page
+    admin_client.post(f"/schedule/{topic.id}/take", data={"slot": f"{room.id}:{slot.id}"})
+    with get_session() as db:
+        entry = db.exec(select(ScheduleEntry).where(
+            ScheduleEntry.topic_id == topic.id)).first()
+    assert entry is not None and entry.timeslot_id == slot.id
 
 
 def test_double_booking_prevented(client, admin_client):
@@ -292,14 +322,51 @@ def test_admin_can_schedule_topic(client, admin_client):
         e = db.exec(select(ScheduleEntry).where(
             ScheduleEntry.topic_id == topic_id)).first()
     assert e is not None and e.room_id == room_id and e.timeslot_id == ts_id
-    # 비소유자(admin, 자기 주제 없음) 읽기전용 표에 제목 노출
-    assert "관리자 배정 주제" in admin_client.get("/schedule").text
+    # 비소유자(admin, 자기 주제 없음) 읽기전용 표에 제목과 설명 모두 노출
+    schedule_page = admin_client.get("/schedule").text
+    assert "관리자 배정 주제" in schedule_page
+    assert "설명 (desc)" in schedule_page
 
     # 관리자가 배정 해제 (admin unassigns)
     admin_client.post(f"/admin/topics/{topic_id}/unschedule")
     with get_session() as db:
         assert db.exec(select(ScheduleEntry).where(
             ScheduleEntry.topic_id == topic_id)).first() is None
+
+
+def test_admin_topics_shows_applicant_email_only_to_admin(client, admin_client):
+    _submit_topic(client, title="이메일 확인 주제", email="applicant@example.com")
+
+    admin_page = admin_client.get("/admin/topics").text
+    assert "신청자 이메일" in admin_page
+    assert "applicant@example.com" in admin_page
+
+    public_page = client.get("/topics").text
+    assert "applicant@example.com" not in public_page
+
+
+def test_topic_list_sorts_scheduled_cards_by_date_time_and_table(client, admin_client):
+    admin_client.post("/admin/rooms", data={"name": "2번 테이블", "sort_order": "1"})
+    admin_client.post("/admin/rooms", data={"name": "1번 테이블", "sort_order": "0"})
+    admin_client.post("/admin/timeslots", data={
+        "date": "2026-08-15", "start_time": "13:30",
+        "slot_minutes": "40", "break_minutes": "0", "count": "2"})
+    first_id = _submit_topic(client, title="먼저 진행되는 주제")
+    second_id = _submit_topic(client, title="나중에 진행되는 주제", email="second@example.com")
+    _submit_topic(client, title="아직 미배정 주제", email="open@example.com")
+    with get_session() as db:
+        rooms = {room.name: room for room in db.exec(select(Room))}
+        slots = list(db.exec(select(Timeslot).order_by(Timeslot.starts_at)))
+    # 먼저 시간대의 1번 테이블, 다음 시간대의 2번 테이블로 배정.
+    admin_client.post(f"/admin/topics/{first_id}/schedule",
+                      data={"slot": f"{rooms['1번 테이블'].id}:{slots[0].id}"})
+    admin_client.post(f"/admin/topics/{second_id}/schedule",
+                      data={"slot": f"{rooms['2번 테이블'].id}:{slots[1].id}"})
+
+    page = client.get("/topics").text
+    assert page.index("먼저 진행되는 주제") < page.index("나중에 진행되는 주제")
+    assert page.index("나중에 진행되는 주제") < page.index("아직 미배정 주제")
+    assert "2026.08.15 · 13:30–14:10 · 1번 테이블" in page
 
 
 def test_admin_schedule_rejects_double_booking(client, admin_client):
@@ -623,19 +690,86 @@ def test_board_qr_remove_image(admin_client, client):
     assert "https://example.com/qr2.png" not in client.get("/board").text
 
 
-def test_board_qr_invalid_slot_ignored(admin_client):
+def test_board_qr_additional_slots_shown(admin_client, client):
     r = admin_client.post("/admin/board/qr/9",
                           data={"image_url": "https://example.com/x.png"},
                           follow_redirects=False)
     assert r.status_code == 303
     with get_session() as db:
-        assert db.exec(select(BoardQR)).first() is None
+        qr = db.exec(select(BoardQR).where(BoardQR.slot == 9)).first()
+        assert qr and qr.image_url == "https://example.com/x.png"
+    assert "https://example.com/x.png" in client.get("/board").text
+
+
+def test_auto_board_rotates_admin_urls(admin_client, client):
+    from app.models import AutoBoardURL
+
+    first = admin_client.post("/admin/auto-board", data={
+        "label": "카드형", "url": "/board", "display_seconds": "15", "sort_order": "2",
+    }, follow_redirects=False)
+    second = admin_client.post("/admin/auto-board", data={
+        "label": "표형", "url": "/board2", "display_seconds": "30", "sort_order": "1",
+    }, follow_redirects=False)
+    assert first.status_code == 303 and second.status_code == 303
+    with get_session() as db:
+        urls = list(db.exec(select(AutoBoardURL).order_by(AutoBoardURL.sort_order)))
+        assert [item.url for item in urls] == ["/board2", "/board"]
+
+    page = client.get("/auto-board").text
+    assert 'id="auto-board-frame"' in page
+    assert '"url": "/board2", "duration": 30' in page
+    assert '"url": "/board", "duration": 15' in page
+
+
+def test_auto_board_rejects_unsafe_url(admin_client):
+    response = admin_client.post("/admin/auto-board", data={
+        "url": "javascript:alert(1)", "display_seconds": "30",
+    })
+    assert "http/https URL" in response.text
 
 
 def test_board_renders(client):
     resp = client.get("/board")
     assert resp.status_code == 200
     assert "전광판" in resp.text
+
+
+def test_board2_renders_table_timetable(client, admin_client):
+    room_id, timeslot_id = _seed_room_and_slot(admin_client)
+    admin_client.post("/admin/rooms", data={"name": "Room B", "sort_order": "1"})
+    topic_id = _submit_topic(client, title="설명 포함 세션")
+    admin_client.post(f"/admin/topics/{topic_id}/schedule",
+                      data={"slot": f"{room_id}:{timeslot_id}"})
+    event_id = _submit_event(client, title="동시간 이벤트")
+    admin_client.post(f"/admin/topics/{event_id}/schedule", data={"slot": str(timeslot_id)})
+    with get_session() as db:
+        topic = db.get(Topic, topic_id)
+        topic.description = "전광판에서 두 줄까지 표시할 세션 설명입니다."
+        topic.image_url = "https://example.com/board2-cover.png"
+        db.add(topic)
+        db.commit()
+    resp = client.get("/board2")
+    assert resp.status_code == 200
+    assert "열린공간 시간표" in resp.text
+    assert "원흥관 3층" in resp.text
+    assert "i.SPACE-아이닷스페이스" in resp.text
+    assert 'class="schedule"' in resp.text
+    assert "Room A" in resp.text
+    assert "전광판에서 두 줄까지 표시할 세션 설명입니다." in resp.text
+    assert "https://example.com/board2-cover.png" in resp.text
+    assert "동시간 이벤트" in resp.text
+    assert 'rowspan="2"' in resp.text
+    assert "비어있습니다. 열린공간 주제를 넣어주세요!" in resp.text
+    assert 'hx-get="/board2/live"' in resp.text
+
+
+def test_board2_shows_registered_qr(client, admin_client):
+    admin_client.post("/admin/board/qr/1", data={
+        "image_url": "https://example.com/board2-qr.png", "caption": "행사 안내",
+    })
+    page = client.get("/board2").text
+    assert "https://example.com/board2-qr.png" in page
+    assert "행사 안내" in page
 
 
 def test_board_shows_full_timetable(client, admin_client):
@@ -665,40 +799,52 @@ def test_seed_demo_data(client, admin_client):
         slots = list(db.exec(select(Timeslot)))
         entries = list(db.exec(select(ScheduleEntry)))
         topics = list(db.exec(select(Topic)))
-        assert len(rooms) == 5
-        assert len(slots) == 8
-        assert any(s.is_closed for s in slots)
-        # 모든 열린 칸(열린 슬롯 × 룸)이 빠짐없이 채워진다 (대화 = 룸 배정 entry)
+        assert len(rooms) == 7
+        assert len(slots) == 14
+        assert len([s for s in slots if s.is_closed]) == 6
+        assert [r.name for r in sorted(rooms, key=lambda r: r.sort_order)] == [
+            "1번 테이블", "2번 테이블", "3번 테이블", "4번 테이블",
+            "5번 테이블", "6번 테이블", "7번 테이블",
+        ]
+        assert {s.starts_at.date().isoformat() for s in slots} == {"2026-08-15", "2026-08-16"}
+        assert {s.time_label for s in slots} == {
+            "09:50–10:30", "10:50–11:30", "11:30–13:30",
+            "13:30–14:10", "14:30–15:10", "15:30–16:10", "16:30–17:10",
+        }
+        assert {s.label for s in slots if s.is_closed} == {
+            "키노트 (Keynote)", "점심 및 휴식 (Lunch & Break)",
+        }
+        # 열린 칸(열린 슬롯 × 테이블)의 절반만 채운다 (대화 = 룸 배정 entry).
         open_slots = [s for s in slots if not s.is_closed]
         cell_count = len(open_slots) * len(rooms)
         conv_entries = [e for e in entries if e.room_id is not None]
         event_entries = [e for e in entries if e.room_id is None]
-        assert len(conv_entries) == cell_count
+        assert len(conv_entries) == cell_count // 2
         # 이벤트(시간만 등록) 데모도 함께 시드된다 (room_id 없음)
         events = [t for t in topics if t.kind == TopicKind.EVENT]
         assert len(events) >= 1
         assert len(event_entries) == len(events)
-        assert len(topics) == cell_count + len(events)
+        assert len(topics) == cell_count // 2 + len(events)
         filled = {(e.room_id, e.timeslot_id) for e in conv_entries}
-        for s in open_slots:
-            for r in rooms:
-                assert (r.id, s.id) in filled  # 빈 칸 없음
+        assert len(filled) == cell_count // 2
 
     # 공개 화면에 데모 데이터가 보임 (demo data visible publicly)
-    assert "파이썬 타입 힌트" in client.get("/topics").text
-    assert "키노트" in client.get("/schedule").text
+    assert "파이썬으로 자동화한 귀찮은 일" in client.get("/topics").text
+    schedule = client.get("/schedule").text
+    assert "1번 테이블" in schedule
+    assert "키노트" in schedule and "점심 및 휴식" in schedule
     # 이벤트가 타임테이블에 배너로 노출됨
     assert "점심 번개모임" in client.get("/schedule").text
 
-    # 전광판: 전 세션이 가득 차서 빈 슬롯(비어있음)이 없어야 함
+    # 전광판: 절반만 배정했으므로 빈 슬롯도 함께 표시된다.
     board = client.get("/board").text
-    assert "파이썬 타입 힌트" in board       # 배정된 세션
-    assert "비어있음 (open)" not in board     # 빈 칸 없음 (모두 채워짐)
+    assert "파이썬으로 자동화한 귀찮은 일" in board  # 배정된 세션
+    assert "비어있음" in board
 
-    # 다시 시드하면 교체(중복 없음) — 여전히 룸 5개 (re-seed replaces, no dupes)
+    # 다시 시드하면 교체(중복 없음) — 여전히 테이블 7개 (re-seed replaces, no dupes)
     admin_client.post("/admin/seed")
     with get_session() as db:
-        assert len(list(db.exec(select(Room)))) == 5
+        assert len(list(db.exec(select(Room)))) == 7
 
     # 전체 비우기 (wipe clears everything)
     admin_client.post("/admin/wipe")
@@ -763,6 +909,18 @@ def test_event_schedules_to_timeslot_only(client, admin_client):
         assert entry is not None
         assert entry.room_id is None
         assert entry.timeslot_id == ts_id
+
+
+def test_event_is_visible_in_conversation_scheduling_timetable(client, admin_client):
+    room_id, ts_id = _seed_room_and_slot(admin_client)
+    event_id = _submit_event(client, title="함께 보는 이벤트")
+    admin_client.post(f"/admin/topics/{event_id}/schedule", data={"slot": str(ts_id)})
+    conversation_id = _submit_topic(client, title="자리 잡기 주제", email="conversation@example.com")
+
+    page = client.get(f"/schedule?topic={conversation_id}").text
+    assert "함께 보는 이벤트" in page
+    assert "이벤트 설명 (event desc)" in page
+    assert f'"slot": "{room_id}:{ts_id}"' in page
 
 
 def test_event_and_conversation_coexist_same_timeslot(client, admin_client):

@@ -1,5 +1,7 @@
-"""공개 페이지 (Public pages): /, /topics, /topics/new, /schedule, /board."""
+"""공개 페이지 (Public pages): /, /topics, /topics/new, /schedule, /board, /board2."""
 from __future__ import annotations
+
+import json
 
 from fasthtml.common import (
     A,
@@ -12,6 +14,7 @@ from fasthtml.common import (
     H1,
     H2,
     Header,
+    Iframe,
     Img,
     Input,
     Label,
@@ -42,6 +45,7 @@ from ..auth import (
     Identity,
     clear_identity,
     identity_from_session,
+    is_admin_email,
     login_required,
     login_required_page,
     note_identity,
@@ -53,11 +57,11 @@ from ..database import get_session
 from ..i18n import normalize_lang, t
 from ..models import ScheduleEntry, Timeslot, Topic, TopicKind, utcnow
 from ..queries import (
-    BOARD_QR_SLOTS,
     active_topics,
     all_rooms,
     all_timeslots,
     board_qrs,
+    auto_board_urls,
     entry_for_topic,
     events_by_timeslot,
     get_owned_topic,
@@ -272,15 +276,24 @@ SCHED_ID = "sched-interactive"
 
 
 def _sched_slot_cell(tid, room, ts, entry, current_entry, *, schedulable,
-                     mine_title=""):
+                     topics, mine_title="", mine_description=""):
     """타임테이블 한 칸 — 내 자리/사용 중/빈 칸. 빈 칸은 눌러 등록·이동."""
     is_mine = current_entry and entry and entry.id == current_entry.id
     if is_mine:
         # 내 자리엔 ✓ + 주제 제목을 표시 (어떤 주제가 잡혔는지 바로 보이게).
         label = f"✓ {mine_title}" if mine_title else t("✓ 내 주제", "✓ My topic")
-        return Td(Span(label, cls="slot-tag", title=mine_title or None),
+        children = [Div(label, cls="slot-title", title=mine_title or None)]
+        if mine_description:
+            children.append(Div(mine_description, cls="slot-description"))
+        return Td(*children,
                   cls="slot-mine", aria_label=t("현재 내 자리", "My current slot"))
     if entry:
+        scheduled_topic = topics.get(entry.topic_id)
+        if scheduled_topic:
+            children = [Div(scheduled_topic.title, cls="slot-title")]
+            if scheduled_topic.description:
+                children.append(Div(scheduled_topic.description, cls="slot-description"))
+            return Td(*children, cls="slot-taken", title=scheduled_topic.title)
         return Td(Span(t("사용 중", "Taken"), cls="slot-tag"), cls="slot-taken")
     if not schedulable:
         return Td(Span(t("비어있음", "Open"), cls="slot-tag"), cls="slot-open")
@@ -295,7 +308,7 @@ def _sched_slot_cell(tid, room, ts, entry, current_entry, *, schedulable,
 
 
 def _sched_grid(rooms, timeslots, taken, tid, current_entry, *, schedulable,
-                mine_title=""):
+                topics, events, mine_title="", mine_description=""):
     header = Tr(Th(t("시간 / 룸", "Time / Room")), *[Th(r.name) for r in rooms])
     rows = []
     for ts in timeslots:
@@ -303,12 +316,30 @@ def _sched_grid(rooms, timeslots, taken, tid, current_entry, *, schedulable,
             rows.append(Tr(Th(ts.time_label, scope="row"),
                            Td(ts.closed_label, colspan=len(rooms), cls="slot-closed")))
             continue
-        cells = [Th(ts.time_label, scope="row")]
+        # 이벤트는 룸을 점유하지 않지만, 같은 시간대에 무엇이 열리는지 보여준다.
+        slot_events = events.get(ts.id, [])
+        for i, event_topic in enumerate(slot_events):
+            event_cells = []
+            if i == 0:
+                event_cells.append(Th(ts.time_label, scope="row",
+                                      rowspan=len(slot_events) + 1))
+            event_children = [
+                Div(Span(t("이벤트", "Event"), cls="kind-badge is-event"),
+                    " ", event_topic.title, cls="slot-title"),
+            ]
+            if event_topic.description:
+                event_children.append(Div(event_topic.description, cls="slot-description"))
+            event_cells.append(Td(*event_children, colspan=len(rooms), cls="slot-event",
+                                  title=event_topic.title))
+            rows.append(Tr(*event_cells))
+
+        cells = [] if slot_events else [Th(ts.time_label, scope="row")]
         for room in rooms:
             entry = taken.get((room.id, ts.id))
             cells.append(_sched_slot_cell(tid, room, ts, entry, current_entry,
                                           schedulable=schedulable,
-                                          mine_title=mine_title))
+                                          topics=topics, mine_title=mine_title,
+                                          mine_description=mine_description))
         rows.append(Tr(*cells))
     return Div(Table(Thead(header), *rows, cls="schedule manage-schedule"),
                cls="schedule-scroll")
@@ -348,12 +379,14 @@ def _sched_event_grid(timeslots, tid, current_entry, *, schedulable):
                cls="schedule-scroll")
 
 
-def _sched_interactive(db, topic):
+def _sched_interactive(db, topic, *, admin_override: bool = False):
     """내 주제 기준 인터랙티브 타임테이블 (htmx swap 대상)."""
     tid = topic.id
     entry = entry_for_topic(db, topic.id)
     rooms = all_rooms(db)
     timeslots = all_timeslots(db)
+    topics = topics_by_id(db)
+    events = events_by_timeslot(db)
     children = []
 
     # 이벤트는 룸이 없어도 시간만 있으면 등록 가능 — 룸 필요는 대화에만.
@@ -363,7 +396,8 @@ def _sched_interactive(db, topic):
             "No rooms/timeslots yet — contact the admin.")))
         return Div(*children, id=SCHED_ID, cls="schedule-section")
 
-    schedulable = is_scheduling_open(db)
+    # 관리자는 사용자용 화면에서도 행사일 전 자가등록 제한을 우회한다.
+    schedulable = admin_override or is_scheduling_open(db)
     opens_on = scheduling_opens_on(db)
     taken = schedule_map(db)
 
@@ -376,7 +410,12 @@ def _sched_interactive(db, topic):
             label = f"{room.name if room else '?'} · {ts.time_label if ts else '?'}"
         children.append(notice(f"{t('현재 배정', 'Scheduled')}: {label}", kind="success"))
 
-    if not schedulable:
+    if admin_override:
+        children.append(P(
+            t("관리자 권한으로 날짜 제한 없이 등록할 수 있습니다.",
+              "Admin access: registration is available regardless of date."),
+            cls="schedule-hint"))
+    elif not schedulable:
         children.append(notice(
             f"{t('타임테이블 등록은 행사 이틀 전부터 열립니다.', 'Self-scheduling opens two days before the event.')}"
             f" {t('등록 시작', 'Opens')}: {opens_on}", kind="info"))
@@ -401,7 +440,8 @@ def _sched_interactive(db, topic):
             return _sched_event_grid(day_slots, tid, entry,
                                      schedulable=schedulable)
         return _sched_grid(rooms, day_slots, taken, tid, entry,
-                           schedulable=schedulable, mine_title=topic.title)
+                           schedulable=schedulable, topics=topics, events=events,
+                           mine_title=topic.title, mine_description=topic.description)
 
     children.append(date_tabs(days, render_day, id_prefix="sday-i",
                               default_day=default_day))
@@ -414,7 +454,7 @@ def _sched_interactive(db, topic):
     return Div(*children, id=SCHED_ID, cls="schedule-section")
 
 
-def _owner_schedule_area(db, my_topics, selected_id):
+def _owner_schedule_area(db, my_topics, selected_id, *, admin_override: bool = False):
     """로그인 소유자용 영역 — 내 주제 칩 + 선택 주제의 인터랙티브 표.
 
     칩을 누르면 그 주제로 표가 활성화(빈 칸 클릭 가능)된다. 페이지 이동 없이
@@ -440,9 +480,10 @@ def _owner_schedule_area(db, my_topics, selected_id):
             t("빈 칸을 눌러 자리를 잡으세요.", "Click an open cell to place it."))
     return Div(
         heading,
+        P(selected.description or t("(설명 없음)", "(No description)"), cls="sched-pick-desc"),
         P(hint, cls="form-hint"),
         Div(*chips, cls="sched-chips") if len(my_topics) > 1 else None,
-        _sched_interactive(db, selected),
+        _sched_interactive(db, selected, admin_override=admin_override),
         id="sched-owner",
     )
 
@@ -551,19 +592,40 @@ def register(app) -> None:
         with get_session() as db:
             topics = active_topics(db)
             slots = schedule_map(db)
-            # topic_id -> 슬롯 라벨
+            # topic_id -> (정렬 시각, 테이블 순서, 배정 정보)
             rooms = {r.id: r for r in all_rooms(db)}
             timeslots = {t.id: t for t in all_timeslots(db)}
-            scheduled: dict[int, str] = {}
+            scheduled: dict[int, tuple[datetime, int, str]] = {}
             for (room_id, ts_id), entry in slots.items():
                 room = rooms.get(room_id)
                 ts = timeslots.get(ts_id)
                 if room and ts:
-                    scheduled[entry.topic_id] = f"{room.name} · {ts.time_label}"
+                    scheduled[entry.topic_id] = (
+                        ts.starts_at,
+                        room.sort_order,
+                        f"{ts.starts_at:%Y.%m.%d} · {ts.time_label} · {room.name}",
+                    )
+            # 시간만 배정하는 이벤트도 배정된 주제로 취급해 날짜·시간 순으로 함께 표시.
+            for ts_id, event_topics in events_by_timeslot(db).items():
+                ts = timeslots.get(ts_id)
+                if ts:
+                    for event_topic in event_topics:
+                        scheduled[event_topic.id] = (
+                            ts.starts_at,
+                            -1,
+                            f"{ts.starts_at:%Y.%m.%d} · {ts.time_label} · {t('이벤트', 'Event')}",
+                        )
+
+            # 배정된 주제 우선 → 날짜 → 시간 → 테이블 순. 미배정 주제는 기존 생성순 유지.
+            indexed_topics = list(enumerate(topics))
+            indexed_topics.sort(key=lambda item: (
+                0, scheduled[item[1].id][0], scheduled[item[1].id][1], item[1].id
+            ) if item[1].id in scheduled else (1, item[0], 0, 0))
+            topics = [topic for _, topic in indexed_topics]
 
             cards = [
                 topic_card(tp, scheduled_label=(
-                    f"{t('배정됨', 'Scheduled')}: {scheduled[tp.id]}"
+                    f"{t('배정됨', 'Scheduled')}: {scheduled[tp.id][2]}"
                     if tp.id in scheduled else None
                 ))
                 for tp in topics
@@ -650,7 +712,8 @@ def register(app) -> None:
                     return layout(
                         t("타임테이블", "Timetable"),
                         H1(t("타임테이블", "Timetable"), id="sched"),
-                        _owner_schedule_area(db, mine, selected),
+                        _owner_schedule_area(db, mine, selected,
+                                             admin_override=is_admin_email(identity)),
                         active="/schedule",
                     )
 
@@ -662,14 +725,16 @@ def register(app) -> None:
             topics = topics_by_id(db)
             events = events_by_timeslot(db)
         if not rooms or not timeslots:
-            body = schedule_table(rooms, timeslots, slots, topics, events=events)
+            body = schedule_table(rooms, timeslots, slots, topics, events=events,
+                                  show_descriptions=True)
         else:
             days = sorted({ts.starts_at.date().isoformat() for ts in timeslots})
 
             def render_day(day: str):
                 day_ts = [ts for ts in timeslots
                           if ts.starts_at.date().isoformat() == day]
-                return schedule_table(rooms, day_ts, slots, topics, events=events)
+                return schedule_table(rooms, day_ts, slots, topics, events=events,
+                                      show_descriptions=True)
 
             body = date_tabs(days, render_day, id_prefix="sday")
         return layout(
@@ -691,7 +756,8 @@ def register(app) -> None:
                 return Div(notice(t("등록한 주제가 없습니다.", "No topics yet."),
                                   kind="error"), id="sched-owner")
             selected = topic if any(m.id == topic for m in mine) else mine[0].id
-            return _owner_schedule_area(db, mine, selected)
+            return _owner_schedule_area(db, mine, selected,
+                                        admin_override=is_admin_email(identity))
 
     @app.post("/schedule/{topic_id}/take")
     def schedule_take(request, session, topic_id: int, slot: str = ""):
@@ -703,13 +769,14 @@ def register(app) -> None:
             if not topic:
                 return Div(notice(t("접근 권한이 없습니다.", "No access."),
                                   kind="error"), id=SCHED_ID)
-            if not is_scheduling_open(db):
+            admin_override = is_admin_email(identity)
+            if not admin_override and not is_scheduling_open(db):
                 opens_on = scheduling_opens_on(db)
                 msg = (t("타임테이블 등록은 행사 이틀 전부터 열립니다.",
                          "Self-scheduling opens two days before the event.")
                        + (f" {t('등록 시작', 'Opens')}: {opens_on}" if opens_on else ""))
                 return Div(notice(msg, kind="error"),
-                           _sched_interactive(db, topic))
+                           _sched_interactive(db, topic, admin_override=admin_override))
             try:
                 if topic.is_event:
                     # 이벤트는 시간만 — slot 은 timeslot id 단독, 룸은 없음.
@@ -718,7 +785,8 @@ def register(app) -> None:
                     room_id, ts_id = (int(x) for x in slot.split(":"))
             except (ValueError, AttributeError):
                 return Div(notice(t("슬롯 선택이 올바르지 않습니다.", "Invalid slot."),
-                                  kind="error"), _sched_interactive(db, topic))
+                                  kind="error"), _sched_interactive(
+                                      db, topic, admin_override=admin_override))
             entry = entry_for_topic(db, topic.id)
             try:
                 if entry:
@@ -734,8 +802,8 @@ def register(app) -> None:
                 return Div(notice(t("이미 선택된 슬롯입니다. 다른 슬롯을 고르세요.",
                                     "That slot was just taken — pick another."),
                                   kind="error"),
-                           _sched_interactive(db, topic))
-            return _sched_interactive(db, topic)
+                           _sched_interactive(db, topic, admin_override=admin_override))
+            return _sched_interactive(db, topic, admin_override=admin_override)
 
     @app.post("/schedule/{topic_id}/cancel")
     def schedule_cancel(request, session, topic_id: int):
@@ -751,12 +819,70 @@ def register(app) -> None:
             if entry:
                 db.delete(entry)
                 db.commit()
-            return _sched_interactive(db, topic)
+            return _sched_interactive(db, topic,
+                                      admin_override=is_admin_email(identity))
 
     @app.get("/board")
     def board(date: str = ""):
         # 전체 페이지는 한 번만 로드 — 이후 board-live 가 스스로 폴링하여 갱신
         return layout(t("전광판", "Display Board"), _board_live(date), chrome=False)
+
+    @app.get("/board2")
+    def board2():
+        """밝은 장소에서 보기 좋은 읽기 전용 테이블형 전광판 시간표."""
+        return layout(
+            t("열린공간 시간표", "OpenSpace Timetable"),
+            _board2_live(),
+            chrome=False,
+            main_cls="content board2-content",
+            body_cls="board2",
+        )
+
+    @app.get("/board2/live")
+    def board2_live():
+        # 전체 페이지를 다시 불러오지 않고 테이블만 주기적으로 갱신한다.
+        return _board2_live()
+
+    @app.get("/auto-board")
+    def auto_board():
+        """관리자가 등록한 URL을 순서대로 표시하는 자동 전광판."""
+        with get_session() as db:
+            urls = auto_board_urls(db)
+        if not urls:
+            return layout(
+                t("자동 전광판", "Auto Board"),
+                Div(P(t("관리자에서 자동 전광판 URL을 등록해 주세요.",
+                        "Add Auto Board URLs in the admin page.")), cls="auto-board-empty"),
+                chrome=False, main_cls="auto-board-content", body_cls="auto-board",
+            )
+        playlist = json.dumps(
+            [{"url": item.url, "duration": item.display_seconds} for item in urls],
+            ensure_ascii=False,
+        ).replace("</", "<\\/")
+        rotate_script = f"""
+        (() => {{
+          const playlist = {playlist};
+          const frame = document.getElementById('auto-board-frame');
+          let index = 0;
+          const showNext = () => {{
+            const item = playlist[index];
+            frame.src = item.url;
+            index = (index + 1) % playlist.length;
+            window.setTimeout(showNext, item.duration * 1000);
+          }};
+          showNext();
+        }})();
+        """
+        return layout(
+            t("자동 전광판", "Auto Board"),
+            Div(
+                Iframe(id="auto-board-frame", title=t("자동 전광판", "Auto Board"),
+                       cls="auto-board-frame"),
+                Script(rotate_script),
+                cls="auto-board-player",
+            ),
+            chrome=False, main_cls="auto-board-content", body_cls="auto-board",
+        )
 
     @app.get("/board/live")
     def board_live(date: str = ""):
@@ -847,6 +973,56 @@ def _board_live(date: str):
     )
 
 
+def _board2_live():
+    """테이블형 전광판 본문 — 45초마다 일정 데이터만 갱신한다."""
+    with get_session() as session:
+        rooms = all_rooms(session)
+        timeslots = all_timeslots(session)
+        slots = schedule_map(session)
+        topics = topics_by_id(session)
+        events = events_by_timeslot(session)
+        qrs = board_qrs(session)
+
+    if not rooms or not timeslots:
+        body = schedule_table(rooms, timeslots, slots, topics, events=events)
+    else:
+        days = sorted({ts.starts_at.date().isoformat() for ts in timeslots})
+
+        def render_day(day: str):
+            day_timeslots = [ts for ts in timeslots
+                             if ts.starts_at.date().isoformat() == day]
+            return schedule_table(rooms, day_timeslots, slots, topics, events=events,
+                                  show_descriptions=True, show_background_images=True,
+                                  merge_event_time=True,
+                                  open_label=t("비어있습니다. 열린공간 주제를 넣어주세요!",
+                                               "Open — add an OpenSpace topic!"))
+
+        body = date_tabs(days, render_day, id_prefix="b2day", panel_display="flex")
+
+    body_children = [body]
+    qr_side = _board_qr_strip(qrs)
+    if qr_side is not None:
+        body_children.append(qr_side)
+
+    return Div(
+        Div(
+            H1(t("열린공간 시간표", "OpenSpace Timetable")),
+            P(
+                t("원흥관 3층 ", "Wonheung Hall 3F "),
+                Span("i.SPACE-아이닷스페이스", cls="board2-location-name"),
+                cls="board2-location",
+            ),
+            cls="board2-head",
+        ),
+        Div(*body_children, cls="board2-body"),
+        id="board2-live",
+        hx_get="/board2/live",
+        hx_trigger="every 45s",
+        hx_target="this",
+        hx_swap="outerHTML",
+    )
+
+
 def _board_card(room, topic):
     """전광판 세션 카드 (Board session card).
 
@@ -900,9 +1076,8 @@ def _board_qr_strip(qrs):
     이미지가 하나도 없으면 None 을 반환해 스트립 자체를 생략한다.
     """
     items = []
-    for slot in BOARD_QR_SLOTS:
-        qr = qrs.get(slot)
-        if not qr or not qr.image_url:
+    for slot, qr in sorted(qrs.items()):
+        if not qr.image_url:
             continue
         children = [Img(src=qr.image_url, alt=f"QR {slot}", cls="board-qr-img")]
         if qr.caption:

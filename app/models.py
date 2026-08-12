@@ -108,7 +108,8 @@ class Timeslot(SQLModel, table=True):
 class BoardQR(SQLModel, table=True):
     """전광판 QR 코드 (Display-board QR) — 슬롯별 이미지 + 설명.
 
-    행사 안내·설문·후원 링크 등을 전광판에 QR 로 노출한다(슬롯 1, 2 두 자리).
+    행사 안내·설문·후원 링크 등을 전광판에 QR 로 노출한다. 슬롯 번호는 표시 순서이며
+    필요한 만큼 추가할 수 있다.
     """
 
     __table_args__ = (
@@ -120,6 +121,18 @@ class BoardQR(SQLModel, table=True):
     slot: int = Field(index=True)  # 1 또는 2
     image_url: Optional[str] = Field(default=None)  # QR 이미지 (업로드 또는 URL)
     caption: str = Field(default="")  # QR 설명 (예: 행사 안내, 설문)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class AutoBoardURL(SQLModel, table=True):
+    """자동 전광판에 순서대로 표시할 URL 한 개."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    url: str
+    label: str = ""
+    display_seconds: int = Field(default=30)
+    sort_order: int = Field(default=0)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
