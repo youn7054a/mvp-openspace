@@ -1,7 +1,7 @@
 """데이터 모델 (Data models) — SQLModel 테이블 정의."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -80,6 +80,21 @@ class Room(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class RoomSlotClosure(SQLModel, table=True):
+    """룸별 닫힌 시간 셀 — 이벤트 중 특정 룸의 대화 접수를 막는다."""
+
+    __table_args__ = (
+        UniqueConstraint("room_id", "timeslot_id", name="uq_room_slot_closure"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    room_id: int = Field(foreign_key="room.id", index=True)
+    timeslot_id: int = Field(foreign_key="timeslot.id", index=True)
+    label: str = ""
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class Timeslot(SQLModel, table=True):
     """시간대 (Timeslot)."""
 
@@ -132,6 +147,64 @@ class AutoBoardURL(SQLModel, table=True):
     url: str
     label: str = ""
     display_seconds: int = Field(default=30)
+    sort_order: int = Field(default=0)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class LightningStatus(str, Enum):
+    """라이트닝토크 신청 상태 (Lightning talk application status)."""
+
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
+class LightningSession(SQLModel, table=True):
+    """하루 단위 라이트닝토크 접수·안내 설정."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_date: date = Field(index=True)
+    board_title: str = ""  # 전광판 제목 (날짜별 설정, 비우면 기본 제목)
+    starts_at: str = ""  # HH:MM, 정규 세션 종료 후 예정 시각
+    venue: str = ""
+    description: str = ""
+    is_open: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class LightningApplication(SQLModel, table=True):
+    """라이트닝토크 신청 — 합격자만 날짜별 발표 순서를 가진다."""
+
+    __table_args__ = (
+        UniqueConstraint("session_id", "applicant_pycon_id",
+                         name="uq_lightning_session_applicant"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: int = Field(foreign_key="lightningsession.id", index=True)
+    applicant_pycon_id: Optional[int] = Field(default=None, index=True)
+    applicant_name: str = ""
+    applicant_email: str
+    applicant_username: str = ""
+    title: str
+    description: str = ""
+    presentation_url: str = ""
+    status: LightningStatus = Field(default=LightningStatus.PENDING, index=True)
+    presentation_order: Optional[int] = Field(default=None)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class LightningQR(SQLModel, table=True):
+    """라이트닝토크 안내 전광판 QR 코드."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: Optional[int] = Field(default=None, foreign_key="lightningsession.id",
+                                      index=True)
+    image_url: str
+    caption: str = ""
     sort_order: int = Field(default=0)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)

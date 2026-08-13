@@ -115,10 +115,13 @@ Can:
 - Create time slots (bulk generator: date / start / length / break / count)
 - Lay out the whole grid in the Timetable Builder (add/edit/delete rows & columns inline)
 - Close slots with a custom label (e.g. 키노트, 휴식) — closed slots are not bookable
+- Close an individual room-and-timeslot cell with its own label (e.g. 이벤트 진행 중)
 - Assign / unassign topics to slots (conversation = room + time, event = time only)
 - View the applicant email in `/admin/topics` for operational contact; it is never public
 - Register any number of display-board QR codes (image + caption), in display order
 - Register multiple board URLs for automatic rotation at `/auto-board`
+- Manage date-specific Lightning Talk applications, acceptance, presentation order,
+  materials, and the privacy-safe board notice
 - Hide topics
 - Delete topics
 - Seed or clear demo data (one click)
@@ -234,6 +237,19 @@ Topics and their descriptions are visible in occupied cells. Time-only events ap
 alongside the table at their assigned time. The 2-day scheduling window applies (see
 Timetable Rule 3).
 
+### /light
+
+Lightning Talk application page. Only dates opened in `/admin/light` are shown.
+Participants may apply for either event day and add or update a shared Google Slides
+or publicly accessible PDF URL. Application is not acceptance; the final decision is
+made by the event team.
+
+### /light/board
+
+Fullscreen Lightning Talk notice board. It contains only the configured date, time,
+venue, description, and QR codes—never applicants, decisions, presentation order,
+or presentation URLs.
+
 ### /schedule/own
 
 HTMX partial (identity-gated) — returns the owner scheduling area for a selected
@@ -312,6 +328,13 @@ survey link).
 Automatic board URL management — add and remove URLs with a label, display duration,
 and order.
 
+### /admin/light
+
+Lightning Talk operations. Administrators open or close applications by date, edit
+the board notice and QR codes, view applicant names/emails/material URLs, accept or
+reject applicants, and set their presentation order. An applicant accepted for one
+event date cannot be accepted for another date.
+
 ---
 
 # Timetable Rules
@@ -364,6 +387,9 @@ A topic may remain unscheduled.
 
 A closed slot (custom label, e.g. 키노트/휴식) accepts no topic.
 
+A room-specific closed cell accepts no conversation topic, while a time-only event
+may still be scheduled for that same timeslot.
+
 ---
 
 # Data Model
@@ -382,6 +408,15 @@ SQLite DB needs a fresh DB or manual `ALTER TABLE` (create_all won't alter).
 ## Room
 
 text id name sort_order created_at updated_at
+
+---
+
+## RoomSlotClosure
+
+text id room_id timeslot_id label created_at updated_at
+
+One optional closure per room-and-timeslot cell. It is displayed as a closed cell on
+the timetable and boards, and blocks conversation scheduling for that room only.
 
 ---
 
@@ -405,6 +440,18 @@ vertical QR strip (event info, survey, sponsor links, …).
 text id url label display_seconds sort_order created_at updated_at
 
 URLs shown sequentially by `/auto-board`.
+
+---
+
+## LightningSession / LightningApplication / LightningQR
+
+`LightningSession` stores one date's application state, expected time, venue, and
+board description. `LightningApplication` stores the verified applicant identity,
+talk title/description, optional shared Slides or public PDF URL, decision status,
+and accepted presentation order. `LightningQR` holds display-only QR codes per date.
+
+Applicant email and material URLs are administrator-only. `/light/board` renders
+only the session notice and QR codes.
 
 ---
 

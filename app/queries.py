@@ -5,7 +5,10 @@ from datetime import date, timedelta
 
 from sqlmodel import Session, select
 
-from .models import AutoBoardURL, BoardQR, Room, ScheduleEntry, Timeslot, Topic
+from .models import (
+    AutoBoardURL, BoardQR, LightningApplication, LightningQR, LightningSession,
+    Room, RoomSlotClosure, ScheduleEntry, Timeslot, Topic,
+)
 
 # 참가자 타임테이블 등록이 열리는 시점 (Self-scheduling opens) — 행사 시작 N일 전부터.
 # 행사 시작 = 가장 이른 타임슬롯 날짜. 그 전까지는 참가자 자가 등록을 막는다
@@ -41,6 +44,13 @@ def schedule_map(session: Session) -> dict[tuple[int, int], ScheduleEntry]:
     """
     entries = session.exec(select(ScheduleEntry).where(ScheduleEntry.room_id != None))  # noqa: E711
     return {(e.room_id, e.timeslot_id): e for e in entries}
+
+
+def room_slot_closures(session: Session) -> dict[tuple[int, int], RoomSlotClosure]:
+    """(room_id, timeslot_id) -> 룸별 닫힘 정보."""
+    return {(item.room_id, item.timeslot_id): item for item in session.exec(
+        select(RoomSlotClosure)
+    )}
 
 
 def events_by_timeslot(session: Session) -> dict[int, list[Topic]]:
@@ -113,6 +123,23 @@ def auto_board_urls(session: Session) -> list[AutoBoardURL]:
     return list(session.exec(
         select(AutoBoardURL).order_by(AutoBoardURL.sort_order, AutoBoardURL.id)
     ))
+
+
+def lightning_sessions(session: Session) -> list[LightningSession]:
+    """라이트닝토크 날짜 설정을 날짜순으로 반환한다."""
+    return list(session.exec(
+        select(LightningSession).order_by(LightningSession.session_date, LightningSession.id)
+    ))
+
+
+def lightning_qrs(session: Session, session_id: int | None = None) -> list[LightningQR]:
+    """세션별(또는 공통) 라이트닝 전광판 QR 목록."""
+    stmt = select(LightningQR)
+    if session_id is None:
+        stmt = stmt.where(LightningQR.session_id == None)  # noqa: E711
+    else:
+        stmt = stmt.where(LightningQR.session_id == session_id)
+    return list(session.exec(stmt.order_by(LightningQR.sort_order, LightningQR.id)))
 
 
 def event_start_date(session: Session) -> date | None:

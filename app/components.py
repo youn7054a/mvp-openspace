@@ -50,6 +50,7 @@ def nav_items():
         ("/", t("주제 등록", "Submit Topic")),
         ("/topics", t("주제 목록", "Topic List")),
         ("/schedule", t("타임테이블", "Timetable")),
+        ("/light", t("라이트닝토크", "Lightning Talk")),
         ("/my", t("내 주제", "MY")),
     ]
     # 관리자 이메일로 로그인했으면 관리자 탭 노출 (admin tab for admin identities).
@@ -330,7 +331,8 @@ def topic_card(topic, *, scheduled_label: str | None = None):
 def schedule_table(rooms, timeslots, slots, topics, *, events=None,
                    empty_notice=None, show_descriptions: bool = False,
                    show_background_images: bool = False,
-                   merge_event_time: bool = False, open_label: str | None = None):
+                   merge_event_time: bool = False, open_label: str | None = None,
+                   room_closures=None):
     """룸×타임슬롯 격자 표 (Room×timeslot grid table).
 
     slots: (room_id, timeslot_id) -> ScheduleEntry. topics: id -> Topic.
@@ -347,6 +349,7 @@ def schedule_table(rooms, timeslots, slots, topics, *, events=None,
             "No rooms/timeslots yet — admin must add them.",
         ))
     events = events or {}
+    room_closures = room_closures or {}
     header = Tr(Th(t("시간 / 룸", "Time / Room")), *[Th(r.name) for r in rooms])
     rows = []
     for ts in timeslots:
@@ -375,6 +378,7 @@ def schedule_table(rooms, timeslots, slots, topics, *, events=None,
         cells = [] if merge_time_cell else [Th(ts.time_label, scope="row")]
         for room in rooms:
             entry = slots.get((room.id, ts.id))
+            closure = room_closures.get((room.id, ts.id))
             topic = topics.get(entry.topic_id) if entry else None
             if topic and topic.is_active:
                 cell_children = [Div(topic.title, cls="slot-title")]
@@ -390,6 +394,8 @@ def schedule_table(rooms, timeslots, slots, topics, *, events=None,
                     cls += " has-image"
                     attrs["style"] = f"background-image:url('{url}')"
                 cells.append(Td(cell_content, cls=cls, title=topic.title, **attrs))
+            elif closure:
+                cells.append(Td(closure.label or t("닫힘", "Closed"), cls="slot-closed"))
             else:
                 cells.append(Td(open_label or t("— 비어있음", "— open"), cls="slot-open"))
         rows.append(Tr(*cells))

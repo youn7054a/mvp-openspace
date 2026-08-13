@@ -4,7 +4,10 @@ from __future__ import annotations
 from sqlmodel import select
 
 from app.database import get_session
-from app.models import BoardQR, Room, Timeslot, Topic
+from app.models import (
+    BoardQR, LightningApplication, LightningStatus, Room, RoomSlotClosure,
+    Timeslot, Topic,
+)
 
 
 def login(client, email="host@example.com", pycon_id=0):
@@ -43,6 +46,15 @@ def _seed_room_and_slot(admin_client):
         return room.id, ts.id
 
 
+def _add_light_session(admin_client, day: str):
+    r = admin_client.post("/admin/light", data={"session_date": day})
+    assert r.status_code == 200
+    with get_session() as db:
+        from app.models import LightningSession
+        return db.exec(select(LightningSession).where(
+            LightningSession.session_date == day)).first().id
+
+
 def test_bulk_timeslot_generation(admin_client):
     # 한 번에 여러 슬롯 생성 (generate consecutive slots in one request)
     admin_client.post("/admin/timeslots", data={
@@ -56,6 +68,79 @@ def test_bulk_timeslot_generation(admin_client):
     assert slots[0].starts_at.strftime("%H:%M") == "10:00"
     assert slots[0].ends_at.strftime("%H:%M") == "10:45"
     assert slots[1].starts_at.strftime("%H:%M") == "10:55"
+
+
+def test_room_specific_slot_closure_blocks_conversation_but_keeps_event(admin_client, client):
+    room_id, ts_id = _seed_room_and_slot(admin_client)
+    # 룸 한 곳만 닫아도 시간대 자체와 이벤트 배정은 유지된다.
+    admin_client.post(f"/admin/timetable/room-slot/{room_id}/{ts_id}/close",
+                      data={"label": "이벤트 진행 중"}, headers={"hx-request": "true"})
+    with get_session() as db:
+        closure = db.exec(select(RoomSlotClosure)).first()
+        assert closure and closure.label == "이벤트 진행 중"
+
+    topic_id = _submit_topic(client, title="닫힌 룸에 넣을 주제", email="speaker@x.com")
+    blocked = client.post(f"/schedule/{topic_id}/take", data={"slot": f"{room_id}:{ts_id}"})
+    assert "닫혀 있습니다" in blocked.text
+
+    event_id = _submit_event(client, title="시간만 쓰는 이벤트")
+    admin_client.post(f"/admin/topics/{event_id}/schedule", data={"slot": str(ts_id)})
+    with get_session() as db:
+        from app.models import ScheduleEntry
+        assert db.exec(select(ScheduleEntry).where(ScheduleEntry.topic_id == event_id)).first()
+
+    assert "이벤트 진행 중" in client.get("/board2").text
+    admin_client.post(f"/admin/timetable/room-slot/{room_id}/{ts_id}/open",
+                      headers={"hx-request": "true"})
+    with get_session() as db:
+        assert db.exec(select(RoomSlotClosure)).first() is None
+
+
+def test_lightning_application_admin_flow_and_private_data(client, admin_client):
+    first_id = _add_light_session(admin_client, "2026-08-15")
+    second_id = _add_light_session(admin_client, "2026-08-16")
+    admin_client.post(f"/admin/light/{first_id}/update", data={
+        "board_title": "오늘의 라이트닝 토크", "starts_at": "18:00",
+        "venue": "원흥관 3층", "description": "정규 세션 종료 후 진행",
+    })
+    admin_client.post(f"/admin/light/{first_id}/qr", data={
+        "image_url": "https://example.com/light-qr.png", "caption": "신청 안내", "sort_order": "1",
+    })
+
+    login(client, "speaker@example.com", pycon_id=101)
+    application = client.post(f"/light/{first_id}/apply", data={
+        "speaker_name": "발표자 별명", "title": "나의 라이트닝 스토리", "description": "짧은 발표",
+        "presentation_url": "https://docs.google.com/presentation/d/test/edit",
+    }, follow_redirects=False)
+    assert application.status_code == 303
+    assert "8월 15일" in client.get("/light").text
+
+    with get_session() as db:
+        first_app = db.exec(select(LightningApplication).where(
+            LightningApplication.session_id == first_id)).first()
+        assert first_app.applicant_name == "발표자 별명"
+    admin_client.post(f"/admin/light/applications/{first_app.id}/accept?session_id={first_id}")
+    with get_session() as db:
+        first_app = db.get(LightningApplication, first_app.id)
+        assert first_app.status == LightningStatus.ACCEPTED
+        assert first_app.presentation_order == 1
+
+    # 양일 신청은 가능하지만 한 날짜 합격자는 다른 날짜 합격 처리하지 않는다.
+    client.post(f"/light/{second_id}/apply", data={"speaker_name": "발표자 별명", "title": "둘째 날 발표"})
+    with get_session() as db:
+        second_app = db.exec(select(LightningApplication).where(
+            LightningApplication.session_id == second_id)).first()
+    rejected = admin_client.post(f"/admin/light/applications/{second_app.id}/accept?session_id={second_id}")
+    assert "이미 확정" in rejected.text
+    with get_session() as db:
+        assert db.get(LightningApplication, second_app.id).status == LightningStatus.PENDING
+
+    # 관리자는 연락처·자료 URL을 보지만 공개 전광판에는 신청자·발표 자료를 싣지 않는다.
+    admin_page = admin_client.get(f"/admin/light/applications?session_id={first_id}").text
+    assert "speaker@example.com" in admin_page and "자료 열기" in admin_page
+    board = client.get("/light/board").text
+    assert "오늘의 라이트닝 토크" in board and "원흥관 3층" in board and "신청 안내" in board
+    assert "speaker@example.com" not in board and "나의 라이트닝 스토리" not in board
 
 
 def test_optional_nickname_and_image_url(client):
@@ -312,6 +397,8 @@ def test_admin_can_schedule_topic(client, admin_client):
 
     room_id, ts_id = _seed_room_and_slot(admin_client)
     token = _submit_topic(client, title="관리자 배정 주제")
+    admin_page = admin_client.get("/admin/topics").text
+    assert "2026.06.23 · 10:00–10:45 · Room A" in admin_page
     with get_session() as db:
         topic_id = db.exec(select(Topic).where(Topic.title == "관리자 배정 주제")).first().id
 
