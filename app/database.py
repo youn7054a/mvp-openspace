@@ -117,7 +117,7 @@ def _migrate_topic_kind_and_event_schedule() -> None:
 
 
 def _migrate_lightning_session() -> None:
-    """기존 라이트닝토크 테이블에 전광판 제목 컬럼을 안전하게 추가한다."""
+    """기존 라이트닝토크 테이블에 새 설정 컬럼을 안전하게 추가한다."""
     if not settings.database_url.startswith("sqlite"):
         return
     from sqlalchemy import text
@@ -127,6 +127,10 @@ def _migrate_lightning_session() -> None:
         if cols and "board_title" not in cols:
             conn.execute(text(
                 "ALTER TABLE lightningsession ADD COLUMN board_title VARCHAR NOT NULL DEFAULT ''"
+            ))
+        if cols and "application_notice" not in cols:
+            conn.execute(text(
+                "ALTER TABLE lightningsession ADD COLUMN application_notice VARCHAR NOT NULL DEFAULT ''"
             ))
 
 

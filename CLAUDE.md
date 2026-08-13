@@ -239,7 +239,8 @@ Timetable Rule 3).
 
 ### /light
 
-Lightning Talk application page. Only dates opened in `/admin/light` are shown.
+Lightning Talk application page. Only an opened session whose date is today is shown;
+applications are accepted on that event day only.
 Participants may apply for either event day and add or update a shared Google Slides
 or publicly accessible PDF URL. Application is not acceptance; the final decision is
 made by the event team.
