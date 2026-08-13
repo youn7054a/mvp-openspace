@@ -67,6 +67,7 @@ from ..queries import (
     get_owned_topic,
     is_scheduling_open,
     schedule_map,
+    room_slot_closures,
     scheduling_opens_on,
     topics_by_id,
     topics_for_owner,
@@ -276,7 +277,7 @@ SCHED_ID = "sched-interactive"
 
 
 def _sched_slot_cell(tid, room, ts, entry, current_entry, *, schedulable,
-                     topics, mine_title="", mine_description=""):
+                     topics, closures, mine_title="", mine_description=""):
     """타임테이블 한 칸 — 내 자리/사용 중/빈 칸. 빈 칸은 눌러 등록·이동."""
     is_mine = current_entry and entry and entry.id == current_entry.id
     if is_mine:
@@ -295,6 +296,9 @@ def _sched_slot_cell(tid, room, ts, entry, current_entry, *, schedulable,
                 children.append(Div(scheduled_topic.description, cls="slot-description"))
             return Td(*children, cls="slot-taken", title=scheduled_topic.title)
         return Td(Span(t("사용 중", "Taken"), cls="slot-tag"), cls="slot-taken")
+    closure = closures.get((room.id, ts.id))
+    if closure:
+        return Td(Span(closure.label or t("닫힘", "Closed"), cls="slot-tag"), cls="slot-closed")
     if not schedulable:
         return Td(Span(t("비어있음", "Open"), cls="slot-tag"), cls="slot-open")
     label = t("여기로 이동", "Move here") if current_entry else t("이 자리 잡기", "Take")
@@ -308,7 +312,7 @@ def _sched_slot_cell(tid, room, ts, entry, current_entry, *, schedulable,
 
 
 def _sched_grid(rooms, timeslots, taken, tid, current_entry, *, schedulable,
-                topics, events, mine_title="", mine_description=""):
+                topics, events, closures, mine_title="", mine_description=""):
     header = Tr(Th(t("시간 / 룸", "Time / Room")), *[Th(r.name) for r in rooms])
     rows = []
     for ts in timeslots:
@@ -339,6 +343,7 @@ def _sched_grid(rooms, timeslots, taken, tid, current_entry, *, schedulable,
             cells.append(_sched_slot_cell(tid, room, ts, entry, current_entry,
                                           schedulable=schedulable,
                                           topics=topics, mine_title=mine_title,
+                                          closures=closures,
                                           mine_description=mine_description))
         rows.append(Tr(*cells))
     return Div(Table(Thead(header), *rows, cls="schedule manage-schedule"),
@@ -400,6 +405,7 @@ def _sched_interactive(db, topic, *, admin_override: bool = False):
     schedulable = admin_override or is_scheduling_open(db)
     opens_on = scheduling_opens_on(db)
     taken = schedule_map(db)
+    closures = room_slot_closures(db)
 
     if entry:
         ts = db.get(Timeslot, entry.timeslot_id)
@@ -440,7 +446,7 @@ def _sched_interactive(db, topic, *, admin_override: bool = False):
             return _sched_event_grid(day_slots, tid, entry,
                                      schedulable=schedulable)
         return _sched_grid(rooms, day_slots, taken, tid, entry,
-                           schedulable=schedulable, topics=topics, events=events,
+                           schedulable=schedulable, topics=topics, events=events, closures=closures,
                            mine_title=topic.title, mine_description=topic.description)
 
     children.append(date_tabs(days, render_day, id_prefix="sday-i",
@@ -722,10 +728,12 @@ def register(app) -> None:
             rooms = all_rooms(db)
             timeslots = all_timeslots(db)
             slots = schedule_map(db)
+            closures = room_slot_closures(db)
             topics = topics_by_id(db)
             events = events_by_timeslot(db)
         if not rooms or not timeslots:
             body = schedule_table(rooms, timeslots, slots, topics, events=events,
+                                  room_closures=closures,
                                   show_descriptions=True)
         else:
             days = sorted({ts.starts_at.date().isoformat() for ts in timeslots})
@@ -734,6 +742,7 @@ def register(app) -> None:
                 day_ts = [ts for ts in timeslots
                           if ts.starts_at.date().isoformat() == day]
                 return schedule_table(rooms, day_ts, slots, topics, events=events,
+                                      room_closures=closures,
                                       show_descriptions=True)
 
             body = date_tabs(days, render_day, id_prefix="sday")
@@ -788,6 +797,10 @@ def register(app) -> None:
                                   kind="error"), _sched_interactive(
                                       db, topic, admin_override=admin_override))
             entry = entry_for_topic(db, topic.id)
+            if room_id is not None and (room_id, ts_id) in room_slot_closures(db):
+                return Div(notice(t("이 룸의 해당 시간은 닫혀 있습니다.",
+                                   "This room is closed at that time."), kind="error"),
+                           _sched_interactive(db, topic, admin_override=admin_override))
             try:
                 if entry:
                     entry.room_id, entry.timeslot_id = room_id, ts_id
@@ -900,6 +913,7 @@ def _board_live(date: str):
         rooms = {r.id: r for r in all_rooms(session)}
         all_ts = all_timeslots(session)
         slots = schedule_map(session)
+        closures = room_slot_closures(session)
         topics = topics_by_id(session)
         events = events_by_timeslot(session)
         qrs = board_qrs(session)
@@ -928,6 +942,11 @@ def _board_live(date: str):
                 if topic and topic.is_active:
                     cards.append(_board_card(room, topic))
                     has_session = True
+                elif closure := closures.get((room_id, ts.id)):
+                    cards.append(Article(
+                        Div(room.name, cls="room"),
+                        Div(closure.label or t("닫힘", "Closed"), cls="title"),
+                        cls="board-session board-closed"))
                 else:
                     cards.append(_board_empty_card(room))  # 빈 칸도 표시
             body = Div(*cards, cls="board-grid")
@@ -979,12 +998,14 @@ def _board2_live():
         rooms = all_rooms(session)
         timeslots = all_timeslots(session)
         slots = schedule_map(session)
+        closures = room_slot_closures(session)
         topics = topics_by_id(session)
         events = events_by_timeslot(session)
         qrs = board_qrs(session)
 
     if not rooms or not timeslots:
-        body = schedule_table(rooms, timeslots, slots, topics, events=events)
+        body = schedule_table(rooms, timeslots, slots, topics, events=events,
+                              room_closures=closures)
     else:
         days = sorted({ts.starts_at.date().isoformat() for ts in timeslots})
 
@@ -992,6 +1013,7 @@ def _board2_live():
             day_timeslots = [ts for ts in timeslots
                              if ts.starts_at.date().isoformat() == day]
             return schedule_table(rooms, day_timeslots, slots, topics, events=events,
+                                  room_closures=closures,
                                   show_descriptions=True, show_background_images=True,
                                   merge_event_time=True,
                                   open_label=t("비어있습니다. 열린공간 주제를 넣어주세요!",

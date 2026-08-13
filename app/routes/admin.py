@@ -39,7 +39,7 @@ from starlette.datastructures import UploadFile
 from ..components import field, layout, notice
 from ..database import get_session
 from ..i18n import t
-from ..models import AutoBoardURL, BoardQR, Room, ScheduleEntry, Timeslot, Topic, utcnow
+from ..models import AutoBoardURL, BoardQR, Room, RoomSlotClosure, ScheduleEntry, Timeslot, Topic, utcnow
 from ..queries import (
     all_rooms,
     all_timeslots,
@@ -47,6 +47,7 @@ from ..queries import (
     board_qrs,
     entry_for_topic,
     schedule_map,
+    room_slot_closures,
     topics_by_id,
 )
 from ..auth import identity_from_session, is_admin_email, note_identity
@@ -66,6 +67,7 @@ def _admin_layout(title, *content):
         A(t("타임슬롯", "Timeslots"), href="/admin/timeslots", cls="nav-link"), " · ",
         A(t("전광판 QR", "Board QR"), href="/admin/board", cls="nav-link"), " · ",
         A(t("자동 전광판", "Auto Board"), href="/admin/auto-board", cls="nav-link"), " · ",
+        A(t("라이트닝토크", "Lightning Talk"), href="/admin/light", cls="nav-link"), " · ",
         A(t("← 사이트로", "← Site"), href="/", cls="nav-link"),
         cls="admin-nav",
     )
@@ -145,6 +147,7 @@ def _builder_partial(db):
     rooms = all_rooms(db)
     timeslots = all_timeslots(db)
     slots = schedule_map(db)
+    closures = room_slot_closures(db)
     topics = topics_by_id(db)
 
     add_col = Button("＋", type="button", title=t("방(열) 추가", "Add room column"),
@@ -171,8 +174,22 @@ def _builder_partial(db):
             topic = topics.get(entry.topic_id) if entry else None
             if topic and topic.is_active:
                 cells.append(Td(topic.title, cls="slot-filled"))
+            elif closure := closures.get((r.id, ts.id)):
+                cells.append(Td(
+                    Div(f"🔒 {closure.label or t('닫힘', 'Closed')}", cls="slot-closed"),
+                    Form(Button(t("열기", "Open"), type="submit", cls="secondary"),
+                         hx_post=f"/admin/timetable/room-slot/{r.id}/{ts.id}/open",
+                         cls="tt-cell-control", **_tt_swap()),
+                    cls="slot-closed"))
             else:
-                cells.append(Td(t("비어있음", "open"), cls="slot-open"))
+                cells.append(Td(
+                    Span(t("비어있음", "open"), cls="slot-open"),
+                    Form(Input(name="label", placeholder=t("닫힘 라벨 (선택)", "Closed label (optional)"),
+                               aria_label=t("닫힘 라벨", "Closed label")),
+                         Button(t("닫기", "Close"), type="submit", cls="secondary"),
+                         hx_post=f"/admin/timetable/room-slot/{r.id}/{ts.id}/close",
+                         cls="tt-cell-control", **_tt_swap()),
+                    cls="slot-open"))
         cells.append(Td("", cls="tt-addcol-cell"))  # ＋열 아래 빈 칸
         body_rows.append(Tr(*cells))
 
@@ -192,7 +209,7 @@ def _builder_partial(db):
     return Div(*children, id="tt-builder", cls="tt-builder")
 
 
-def _admin_sched_cell(topic, entry, rooms, open_ts, taken, room_by_id, ts_by_id):
+def _admin_sched_cell(topic, entry, rooms, open_ts, taken, room_by_id, ts_by_id, closures):
     """주제별 타임테이블 배정 컨트롤 (Admin assign topic to a slot).
 
     대화는 룸+시간(slot="room:ts"), 이벤트는 시간만(slot="ts") 배정한다.
@@ -215,10 +232,13 @@ def _admin_sched_cell(topic, entry, rooms, open_ts, taken, room_by_id, ts_by_id)
         )
     if topic.is_event:
         # 이벤트는 룸 없이 열린 시간대만 — 같은 시간 여러 이벤트 허용(중복 제외 안 함).
-        opts = [Option(ts.time_label, value=f"{ts.id}") for ts in open_ts]
+        opts = [Option(f"{ts.starts_at:%Y.%m.%d} · {ts.time_label}", value=f"{ts.id}")
+                for ts in open_ts]
     else:
-        opts = [Option(f"{r.name} · {ts.time_label}", value=f"{r.id}:{ts.id}")
-                for ts in open_ts for r in rooms if (r.id, ts.id) not in taken]
+        opts = [Option(f"{ts.starts_at:%Y.%m.%d} · {ts.time_label} · {r.name}",
+                       value=f"{r.id}:{ts.id}")
+                for ts in open_ts for r in rooms
+                if (r.id, ts.id) not in taken and (r.id, ts.id) not in closures]
     if not opts:
         return Span(t("빈 슬롯 없음", "no open slot"), cls="sched-current")
     return Form(
@@ -387,6 +407,7 @@ def register(app) -> None:
             rooms = all_rooms(db)
             open_ts = [t for t in all_timeslots(db) if not t.is_closed]
             taken = schedule_map(db)
+            closures = room_slot_closures(db)
             entry_by_topic = {e.topic_id: e for e in taken.values()}
             room_by_id = {r.id: r for r in rooms}
             ts_by_id = {t.id: t for t in all_timeslots(db)}
@@ -416,7 +437,7 @@ def register(app) -> None:
                     Td(tp.host_email),
                     Td(state_label),
                     Td(_admin_sched_cell(tp, entry_by_topic.get(tp.id), rooms,
-                                         open_ts, taken, room_by_id, ts_by_id)),
+                                         open_ts, taken, room_by_id, ts_by_id, closures)),
                     Td(*actions),
                 ))
         table = Table(
@@ -483,7 +504,8 @@ def register(app) -> None:
             except (ValueError, AttributeError):
                 return RedirectResponse("/admin/topics", status_code=303)
             ts = db.get(Timeslot, ts_id)
-            if not ts or ts.is_closed:
+            if not ts or ts.is_closed or (room_id is not None and
+                                          (room_id, ts_id) in room_slot_closures(db)):
                 return RedirectResponse("/admin/topics", status_code=303)
             entry = entry_for_topic(db, topic_id)
             try:
@@ -504,6 +526,37 @@ def register(app) -> None:
                              "That slot is already taken."), kind="error"),
                     A(t("돌아가기", "Back"), href="/admin/topics", cls="btn secondary"))
         return RedirectResponse("/admin/topics", status_code=303)
+
+    @app.post("/admin/timetable/room-slot/{room_id}/{timeslot_id}/close")
+    def tt_room_slot_close(session, room_id: int, timeslot_id: int, label: str = ""):
+        """룸별 셀 닫기 — 전역 시간은 유지하고 해당 룸의 대화만 막는다."""
+        if (redir := _require_admin(session)):
+            return redir
+        with get_session() as db:
+            if not db.get(Room, room_id) or not db.get(Timeslot, timeslot_id):
+                return _builder_partial(db)
+            if schedule_map(db).get((room_id, timeslot_id)):
+                return _builder_partial(db)
+            closure = db.exec(select(RoomSlotClosure).where(
+                RoomSlotClosure.room_id == room_id,
+                RoomSlotClosure.timeslot_id == timeslot_id,
+            )).first() or RoomSlotClosure(room_id=room_id, timeslot_id=timeslot_id)
+            closure.label, closure.updated_at = (label or "").strip(), utcnow()
+            db.add(closure); db.commit()
+            return _builder_partial(db)
+
+    @app.post("/admin/timetable/room-slot/{room_id}/{timeslot_id}/open")
+    def tt_room_slot_open(session, room_id: int, timeslot_id: int):
+        if (redir := _require_admin(session)):
+            return redir
+        with get_session() as db:
+            closure = db.exec(select(RoomSlotClosure).where(
+                RoomSlotClosure.room_id == room_id,
+                RoomSlotClosure.timeslot_id == timeslot_id,
+            )).first()
+            if closure:
+                db.delete(closure); db.commit()
+            return _builder_partial(db)
 
     @app.post("/admin/topics/{topic_id}/unschedule")
     def admin_topic_unschedule(session, topic_id: int):
@@ -644,6 +697,9 @@ def register(app) -> None:
             for e in db.exec(select(ScheduleEntry).where(
                     ScheduleEntry.timeslot_id == slot_id)):
                 db.delete(e)
+            for closure in db.exec(select(RoomSlotClosure).where(
+                    RoomSlotClosure.timeslot_id == slot_id)):
+                db.delete(closure)
             ts = db.get(Timeslot, slot_id)
             if ts:
                 db.delete(ts)
@@ -659,6 +715,9 @@ def register(app) -> None:
             for e in db.exec(select(ScheduleEntry).where(
                     ScheduleEntry.room_id == room_id)):
                 db.delete(e)
+            for closure in db.exec(select(RoomSlotClosure).where(
+                    RoomSlotClosure.room_id == room_id)):
+                db.delete(closure)
             room = db.get(Room, room_id)
             if room:
                 db.delete(room)

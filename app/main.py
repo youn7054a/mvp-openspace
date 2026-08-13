@@ -12,7 +12,7 @@ from .config import get_settings
 from .auth import note_identity
 from .database import init_db
 from .i18n import set_lang, set_path
-from .routes import admin, manage, public
+from .routes import admin, light, manage, public
 
 settings = get_settings()
 
@@ -64,6 +64,7 @@ def create_app() -> FastHTML:
 
     # 라우트 등록 (단일 app 에 모듈별 등록 — 순환 import 방지)
     public.register(app)
+    light.register(app)
     manage.register(app)
     admin.register(app)
 

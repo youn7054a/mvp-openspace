@@ -479,6 +479,9 @@ table.tt-edit td, table.tt-edit th { vertical-align: middle; text-align: center;
 }
 .tt-add-col { width: 2.4rem; height: 2.4rem; font-size: 1.1rem; padding: 0; }
 .tt-addcol-cell { background: transparent; border-color: transparent; }
+.tt-cell-control { display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; justify-content: center; margin-top: .35rem; }
+.tt-cell-control input { width: min(100%, 8rem); min-width: 0; padding: .3rem; font-size: .65rem; }
+.tt-cell-control .btn, .tt-cell-control button { padding: .35rem .45rem; font-size: .58rem; }
 .tt-addrow { margin: .5rem 0 0; }
 .tt-add-row { width: 100%; padding: .7rem; font-size: .82rem; letter-spacing: .03em; }
 .admin-nav { margin: 0 0 1.6rem; color: var(--ink-soft); font-family: var(--font-mono); font-size: .8rem; }
@@ -745,6 +748,25 @@ body.auto-board .auto-board-content {
 .qr-grid { display: flex; flex-wrap: wrap; gap: 1.5rem; }
 .qr-block { flex: 1 1 18rem; border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.2rem 1.2rem; background: var(--card); }
 .qr-block h2 { margin: .2rem 0 .8rem; }
+
+/* ---------- 라이트닝토크 (Lightning Talk) ---------- */
+.light-application, .light-admin-session { margin: 1.5rem 0; padding: 1.25rem; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+.light-when, .light-status { font-weight: 700; color: var(--foreground); }
+.light-admin-session table { margin-bottom: 1.25rem; }
+.light-admin-session input[type="number"] { width: 4.5rem; }
+.light-qr-preview { display: block; width: 8rem; height: 8rem; object-fit: contain; background: #fff; padding: .4rem; }
+.light-board { margin: 0; overflow: hidden; background: #fff; color: #111; }
+.light-board-content { box-sizing: border-box; width: 100vw; height: 100vh; padding: clamp(2rem, 5vh, 5rem) clamp(2rem, 7vw, 8rem); display: flex; flex-direction: column; gap: clamp(1rem, 2vh, 2.5rem); background: #fff; color: #111; }
+.light-board-content > h1 { margin: 0; font-size: clamp(2.2rem, 6vw, 6rem); line-height: 1.05; color: #111 !important; }
+.light-board-lead { margin: 0; font-size: clamp(1.1rem, 2.8vw, 2.8rem); font-weight: 700; color: #111; }
+.light-board-card { flex: 1 1 0; min-height: 0; border: 4px solid #111; border-radius: 18px; padding: clamp(1.25rem, 3vh, 3rem); display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto 1fr; gap: 1rem 3vw; background: #fff; color: #111; }
+.light-board-card h2 { margin: 0; font-size: clamp(1.7rem, 4vw, 4.5rem); color: #111 !important; }
+.light-board-when { margin: 0; font-size: clamp(1.2rem, 3vw, 3rem); font-weight: 800; text-align: right; color: #111 !important; }
+.light-board-description { margin: 0; align-self: center; font-size: clamp(1.2rem, 3.2vw, 3.5rem); font-weight: 700; line-height: 1.35; color: #111; }
+.light-board-qrs { display: flex; flex-direction: column; justify-content: center; gap: 1rem; grid-column: 2; grid-row: 2; }
+.light-board-qr { display: flex; align-items: center; gap: 1rem; }
+.light-board-qr-img { width: clamp(5rem, 10vw, 11rem); height: clamp(5rem, 10vw, 11rem); object-fit: contain; background: #fff; border: 1px solid #222; padding: .35rem; }
+.light-board-qr-caption { margin: 0; max-width: 12rem; font-size: clamp(.9rem, 1.7vw, 1.6rem); font-weight: 700; color: #111; }
 
 /* ---------- 반응형 (Responsive) ---------- */
 @media (max-width: 52rem) {
