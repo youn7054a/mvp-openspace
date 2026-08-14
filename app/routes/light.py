@@ -1,8 +1,9 @@
 """라이트닝토크: 신청(/light), 관리자(/admin/light), 안내 전광판(/light/board)."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 from fasthtml.common import A, Button, Div, Form, H1, H2, Img, Input, P, RedirectResponse, Section, Table, Td, Th, Thead, Tr
 from sqlalchemy.exc import IntegrityError
@@ -40,8 +41,8 @@ def _valid_material_url(value: str) -> str | None:
 
 
 def _today() -> date:
-    """신청 가능 날짜 판정용 — 테스트에서 고정할 수 있게 분리."""
-    return date.today()
+    """신청 가능 날짜 판정용 — 행사 현장 시간(Asia/Seoul)을 기준으로 한다."""
+    return datetime.now(ZoneInfo("Asia/Seoul")).date()
 
 
 def _time_label(value: str) -> str:
