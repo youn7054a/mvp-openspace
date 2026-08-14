@@ -599,6 +599,13 @@ body.board2 td.slot-event {
   font-size: clamp(.82rem, min(2.3vh, 1.4vw), 1.6rem);
 }
 body.board2 td.slot-event { font-weight: 700; }
+/* 이벤트 배너는 대화 카드보다 보조 정보이므로 제목·설명을 절반 크기로 표시. */
+body.board2 td.slot-event .slot-title {
+  font-size: clamp(.45rem, min(1.2vh, .7vw), .85rem);
+}
+body.board2 td.slot-event .slot-description {
+  font-size: clamp(.4rem, min(.95vh, .55vw), .65rem);
+}
 body.board2 table.schedule td.slot-filled {
   white-space: normal; overflow: visible; text-overflow: clip;
 }
