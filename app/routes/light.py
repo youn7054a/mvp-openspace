@@ -36,6 +36,20 @@ def _valid_material_url(value: str) -> str | None:
     return value if parsed.scheme in {"http", "https"} and parsed.netloc else None
 
 
+def _today() -> date:
+    """신청 가능 날짜 판정용 — 테스트에서 고정할 수 있게 분리."""
+    return date.today()
+
+
+def _time_label(value: str) -> str:
+    """HH:MM 저장값을 한국어 표시용 'H시 MM분'으로 바꾼다."""
+    try:
+        hour, minute = (int(part) for part in (value or "").split(":", 1))
+        return f"{hour}시 {minute:02d}분"
+    except (TypeError, ValueError):
+        return value or ""
+
+
 def _application_for(db, session_id: int, identity):
     rows = db.exec(select(LightningApplication).where(
         LightningApplication.session_id == session_id,
@@ -77,7 +91,7 @@ def _light_form(light_session, application=None, default_name: str = ""):
         status = None
     return Section(
         H2(f"{light_session.session_date:%m}월 {light_session.session_date:%d}일 · {heading}"),
-        P(" · ".join(x for x in [light_session.starts_at, light_session.venue] if x),
+        P(" · ".join(x for x in [_time_label(light_session.starts_at), light_session.venue] if x),
           cls="light-when"),
         P(light_session.description, cls="field-help") if light_session.description else None,
         status,
@@ -157,18 +171,21 @@ def register(app) -> None:
         if not identity:
             return login_required_page()
         with get_session() as db:
-            sessions = [item for item in lightning_sessions(db) if item.is_open]
+            # 라이트닝토크는 현장 당일 접수만 허용한다.
+            sessions = [item for item in lightning_sessions(db)
+                        if item.is_open and item.session_date == _today()]
             applications = {item.id: _application_for(db, item.id, identity) for item in sessions}
         default_name = identity.username or identity.email.split("@")[0]
         body = [_light_form(item, applications[item.id], default_name) for item in sessions]
         if not body:
-            body = [notice(t("현재 신청 가능한 라이트닝토크가 없습니다.",
-                             "There are no Lightning Talks open for applications."))]
+            body = [notice(t("라이트닝토크 신청은 해당 행사일에만 가능합니다.",
+                             "Lightning Talk applications are available only on the event day."))]
         return layout(t("라이트닝토크", "Lightning Talk"),
                       H1(t("라이트닝토크 신청", "Lightning Talk Application")),
-                      P(t("당일 신청을 받습니다. 최종 참여 여부는 내부 운영 기준에 따라 결정됩니다.",
+                      *([P(sessions[0].application_notice or t(
+                          "당일 신청을 받습니다. 최종 참여 여부는 내부 운영 기준에 따라 결정됩니다.",
                           "Applications are accepted on the day. Final participation follows internal operating guidelines."),
-                        cls="field-help"),
+                          cls="light-application-notice")] if sessions else []),
                       *body, active="/light")
 
     @app.post("/light/{light_session_id}/apply")
@@ -186,7 +203,7 @@ def register(app) -> None:
                           A(t("돌아가기", "Back"), href="/light", cls="btn secondary"))
         with get_session() as db:
             item = db.get(LightningSession, light_session_id)
-            if not item or not item.is_open:
+            if not item or not item.is_open or item.session_date != _today():
                 return RedirectResponse("/light", status_code=303)
             if _application_for(db, item.id, identity):
                 return RedirectResponse("/light", status_code=303)
@@ -241,6 +258,10 @@ def register(app) -> None:
                 Form(field(t("전광판 제목", "Board title"), "board_title", value=item.board_title,
                            required=False,
                            placeholder=t("예: 파이콘 한국 라이트닝 토크", "e.g. PyCon Korea Lightning Talk")),
+                     field(t("신청 안내 문구", "Application notice"), "application_notice",
+                           value=item.application_notice, textarea=True, required=False,
+                           placeholder=t("예: 당일 신청을 받습니다. 최종 참여 여부는 내부 운영 기준에 따라 결정됩니다.",
+                                         "e.g. Applications are accepted on the day.")),
                      field(t("시작 예정 시각", "Start time"), "starts_at", value=item.starts_at,
                            input_type="time", required=False),
                      field(t("장소", "Venue"), "venue", value=item.venue, required=False),
@@ -314,13 +335,14 @@ def register(app) -> None:
 
     @app.post("/admin/light/{light_session_id}/update")
     def admin_light_update(session, light_session_id: int, board_title: str = "", starts_at: str = "",
-                           venue: str = "", description: str = ""):
+                           venue: str = "", description: str = "", application_notice: str = ""):
         if (redir := _require_admin(session)):
             return redir
         with get_session() as db:
             item = db.get(LightningSession, light_session_id)
             if item:
                 item.board_title = (board_title or "").strip()
+                item.application_notice = (application_notice or "").strip()
                 item.starts_at, item.venue = (starts_at or "").strip(), (venue or "").strip()
                 item.description, item.updated_at = (description or "").strip(), utcnow()
                 db.add(item); db.commit()
@@ -417,7 +439,7 @@ def register(app) -> None:
             qrs = qr_map[item.id]
             cards.append(Section(
                 H2(f"{item.session_date:%Y년 %m월 %d일}"),
-                P(" · ".join(x for x in [item.starts_at, item.venue] if x), cls="light-board-when"),
+                P(" · ".join(x for x in [_time_label(item.starts_at), item.venue] if x), cls="light-board-when"),
                 P(item.description or t("정규 세션 종료 후 진행됩니다.", "Held after the regular sessions."), cls="light-board-description"),
                 Div(*[Div(Img(src=qr.image_url, alt=qr.caption or "QR", cls="light-board-qr-img"),
                              P(qr.caption, cls="light-board-qr-caption"), cls="light-board-qr") for qr in qrs],

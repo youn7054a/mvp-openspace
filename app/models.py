@@ -169,6 +169,7 @@ class LightningSession(SQLModel, table=True):
     starts_at: str = ""  # HH:MM, 정규 세션 종료 후 예정 시각
     venue: str = ""
     description: str = ""
+    application_notice: str = ""  # 참가자 신청 화면 안내
     is_open: bool = Field(default=True)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)

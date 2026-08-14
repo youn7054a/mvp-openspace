@@ -752,6 +752,15 @@ body.auto-board .auto-board-content {
 /* ---------- 라이트닝토크 (Lightning Talk) ---------- */
 .light-application, .light-admin-session { margin: 1.5rem 0; padding: 1.25rem; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
 .light-when, .light-status { font-weight: 700; color: var(--foreground); }
+@keyframes light-notice-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 rgba(245, 201, 61, 0); }
+  50% { transform: scale(1.015); box-shadow: 0 0 1.2rem rgba(245, 201, 61, .45); }
+}
+.light-application-notice {
+  margin: 1.2rem 0; padding: 1rem 1.2rem; border: 2px solid var(--accent); border-radius: 8px;
+  background: var(--accent-soft); color: var(--accent); font-size: clamp(1.05rem, 2.4vw, 1.5rem);
+  font-weight: 800; line-height: 1.55; text-align: center; animation: light-notice-pulse 1.8s ease-in-out infinite;
+}
 .light-admin-session table { margin-bottom: 1.25rem; }
 .light-admin-session input[type="number"] { width: 4.5rem; }
 .light-qr-preview { display: block; width: 8rem; height: 8rem; object-fit: contain; background: #fff; padding: .4rem; }

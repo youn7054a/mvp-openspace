@@ -96,18 +96,24 @@ def test_room_specific_slot_closure_blocks_conversation_but_keeps_event(admin_cl
         assert db.exec(select(RoomSlotClosure)).first() is None
 
 
-def test_lightning_application_admin_flow_and_private_data(client, admin_client):
+def test_lightning_application_admin_flow_and_private_data(client, admin_client, monkeypatch):
+    from datetime import date
+    from app.routes import light
+
+    monkeypatch.setattr(light, "_today", lambda: date(2026, 8, 15))
     first_id = _add_light_session(admin_client, "2026-08-15")
     second_id = _add_light_session(admin_client, "2026-08-16")
     admin_client.post(f"/admin/light/{first_id}/update", data={
         "board_title": "오늘의 라이트닝 토크", "starts_at": "18:00",
         "venue": "원흥관 3층", "description": "정규 세션 종료 후 진행",
+        "application_notice": "오늘만 현장 신청을 받습니다.",
     })
     admin_client.post(f"/admin/light/{first_id}/qr", data={
         "image_url": "https://example.com/light-qr.png", "caption": "신청 안내", "sort_order": "1",
     })
 
     login(client, "speaker@example.com", pycon_id=101)
+    assert "오늘만 현장 신청을 받습니다." in client.get("/light").text
     application = client.post(f"/light/{first_id}/apply", data={
         "speaker_name": "발표자 별명", "title": "나의 라이트닝 스토리", "description": "짧은 발표",
         "presentation_url": "https://docs.google.com/presentation/d/test/edit",
@@ -125,7 +131,9 @@ def test_lightning_application_admin_flow_and_private_data(client, admin_client)
         assert first_app.status == LightningStatus.ACCEPTED
         assert first_app.presentation_order == 1
 
-    # 양일 신청은 가능하지만 한 날짜 합격자는 다른 날짜 합격 처리하지 않는다.
+    # 다른 행사일에도 당일에만 신청할 수 있다. 양일 신청은 가능하지만 한 날짜
+    # 합격자는 다른 날짜 합격 처리하지 않는다.
+    monkeypatch.setattr(light, "_today", lambda: date(2026, 8, 16))
     client.post(f"/light/{second_id}/apply", data={"speaker_name": "발표자 별명", "title": "둘째 날 발표"})
     with get_session() as db:
         second_app = db.exec(select(LightningApplication).where(
@@ -139,7 +147,8 @@ def test_lightning_application_admin_flow_and_private_data(client, admin_client)
     admin_page = admin_client.get(f"/admin/light/applications?session_id={first_id}").text
     assert "speaker@example.com" in admin_page and "자료 열기" in admin_page
     board = client.get("/light/board").text
-    assert "오늘의 라이트닝 토크" in board and "원흥관 3층" in board and "신청 안내" in board
+    assert "오늘의 라이트닝 토크" in board and "18시 00분" in board
+    assert "원흥관 3층" in board and "신청 안내" in board
     assert "speaker@example.com" not in board and "나의 라이트닝 스토리" not in board
 
 
