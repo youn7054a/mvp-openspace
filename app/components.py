@@ -190,7 +190,8 @@ def page_head(title: str, *, auto_refresh: int | None = None):
         )),
         Link(rel="stylesheet",
              href="https://cdn.jsdelivr.net/npm/galmuri/dist/galmuri.css"),
-        Link(rel="stylesheet", href="/static/app.css"),
+        # 배포 뒤에도 전광판 레이아웃 CSS가 이전 브라우저 캐시에서 남지 않게 버전 부여.
+        Link(rel="stylesheet", href="/static/app.css?v=20260814-board3"),
     ]
     if auto_refresh:
         # 전광판 자동 새로고침 (Display board auto refresh)
