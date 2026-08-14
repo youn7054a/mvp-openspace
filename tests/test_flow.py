@@ -6,7 +6,7 @@ from sqlmodel import select
 from app.database import get_session
 from app.models import (
     BoardQR, LightningApplication, LightningQR, LightningStatus, Room, RoomSlotClosure,
-    Timeslot, Topic,
+    ScheduleEntry, Timeslot, Topic, TopicKind,
 )
 
 
@@ -97,6 +97,37 @@ def test_room_specific_slot_closure_blocks_conversation_but_keeps_event(admin_cl
                       headers={"hx-request": "true"})
     with get_session() as db:
         assert db.exec(select(RoomSlotClosure)).first() is None
+
+
+def test_admin_changes_topic_type_and_unassigns_existing_schedule(admin_client, client):
+    room_id, ts_id = _seed_room_and_slot(admin_client)
+    topic_id = _submit_topic(client, title="유형 전환 주제")
+    admin_client.post(f"/admin/topics/{topic_id}/schedule",
+                      data={"slot": f"{room_id}:{ts_id}"})
+    page = admin_client.get("/admin/topics").text
+    assert "유형을 바꾸면 현재 배정이 해제됩니다" in page
+
+    admin_client.post(f"/admin/topics/{topic_id}/kind", data={"kind": "event"})
+    with get_session() as db:
+        topic = db.get(Topic, topic_id)
+        assert topic.kind == TopicKind.EVENT
+        assert db.exec(select(ScheduleEntry).where(ScheduleEntry.topic_id == topic_id)).first() is None
+
+
+def test_owner_changes_topic_type_and_unassigns_existing_schedule(admin_client, client):
+    room_id, ts_id = _seed_room_and_slot(admin_client)
+    topic_id = _submit_topic(client, title="작성자 유형 전환")
+    client.post(f"/schedule/{topic_id}/take", data={"slot": f"{room_id}:{ts_id}"})
+    page = client.get(f"/manage/{topic_id}").text
+    assert "유형을 바꾸면 현재 배정이 해제됩니다" in page
+
+    client.post(f"/manage/{topic_id}/edit", data={
+        "title": "작성자 유형 전환", "kind": "event",
+    })
+    with get_session() as db:
+        topic = db.get(Topic, topic_id)
+        assert topic.kind == TopicKind.EVENT
+        assert db.exec(select(ScheduleEntry).where(ScheduleEntry.topic_id == topic_id)).first() is None
 
 
 def test_lightning_application_admin_flow_and_private_data(client, admin_client, monkeypatch):

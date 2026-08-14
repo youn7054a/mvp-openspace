@@ -39,7 +39,8 @@ from starlette.datastructures import UploadFile
 from ..components import field, layout, notice
 from ..database import get_session
 from ..i18n import t
-from ..models import AutoBoardURL, BoardLanguageSetting, BoardQR, Room, RoomSlotClosure, ScheduleEntry, Timeslot, Topic, utcnow
+from ..models import (AutoBoardURL, BoardLanguageSetting, BoardQR, Room, RoomSlotClosure,
+                      ScheduleEntry, Timeslot, Topic, TopicKind, utcnow)
 from ..queries import (
     all_rooms,
     all_timeslots,
@@ -413,7 +414,8 @@ def register(app) -> None:
             open_ts = [t for t in all_timeslots(db) if not t.is_closed]
             taken = schedule_map(db)
             closures = room_slot_closures(db)
-            entry_by_topic = {e.topic_id: e for e in taken.values()}
+            # 이벤트(룸 없음) 배정도 유형 전환 시 해제 여부를 알려야 하므로 전체를 조회한다.
+            entry_by_topic = {e.topic_id: e for e in db.exec(select(ScheduleEntry))}
             room_by_id = {r.id: r for r in rooms}
             ts_by_id = {t.id: t for t in all_timeslots(db)}
             rows = []
@@ -436,6 +438,22 @@ def register(app) -> None:
                         Button(t("삭제", "Delete"), type="submit", cls="danger"),
                         method="post", action=f"/admin/topics/{tp.id}/delete",
                         style="display:inline"))
+                    is_scheduled = tp.id in entry_by_topic
+                    actions.append(Form(
+                        Select(
+                            Option(t("대화", "Conversation"), value="conversation",
+                                   selected=not tp.is_event),
+                            Option(t("이벤트", "Event"), value="event",
+                                   selected=tp.is_event),
+                            name="kind", aria_label=t("주제 유형", "Topic type"),
+                        ),
+                        Button(t("유형 변경", "Change type"), type="submit", cls="secondary"),
+                        method="post", action=f"/admin/topics/{tp.id}/kind", style="display:inline",
+                        **({"onsubmit": "return confirm(" + repr(t(
+                            "유형을 바꾸면 현재 배정이 해제됩니다. 계속할까요?",
+                            "Changing the type will remove the current schedule. Continue?"
+                        )) + ");"} if is_scheduled else {}),
+                    ))
                 rows.append(Tr(
                     Td(tp.title),
                     Td(tp.display_host),
@@ -571,6 +589,24 @@ def register(app) -> None:
             entry = entry_for_topic(db, topic_id)
             if entry:
                 db.delete(entry)
+                db.commit()
+        return RedirectResponse("/admin/topics", status_code=303)
+
+    @app.post("/admin/topics/{topic_id}/kind")
+    def admin_topic_change_kind(session, topic_id: int, kind: str = "conversation"):
+        """관리자가 대화·이벤트 유형을 바꾼다. 기존 배정은 호환되지 않아 해제한다."""
+        if (redir := _require_admin(session)):
+            return redir
+        new_kind = TopicKind.EVENT if kind == "event" else TopicKind.CONVERSATION
+        with get_session() as db:
+            topic = db.get(Topic, topic_id)
+            if topic and topic.deleted_at is None and topic.kind != new_kind:
+                entry = entry_for_topic(db, topic_id)
+                if entry:
+                    db.delete(entry)
+                topic.kind = new_kind
+                topic.updated_at = utcnow()
+                db.add(topic)
                 db.commit()
         return RedirectResponse("/admin/topics", status_code=303)
 
