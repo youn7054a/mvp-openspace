@@ -601,10 +601,10 @@ body.board2 td.slot-event {
 body.board2 td.slot-event { font-weight: 700; }
 /* 이벤트 배너는 대화 카드보다 보조 정보이므로 제목·설명을 절반 크기로 표시. */
 body.board2 td.slot-event .slot-title {
-  font-size: clamp(.315rem, min(.84vh, .49vw), .595rem);
+  font-size: clamp(.45rem, min(1.2vh, .7vw), .85rem);
 }
 body.board2 td.slot-event .slot-description {
-  font-size: clamp(.28rem, min(.665vh, .385vw), .455rem);
+  font-size: clamp(.4rem, min(.95vh, .55vw), .65rem);
 }
 body.board2 table.schedule td.slot-filled {
   white-space: normal; overflow: visible; text-overflow: clip;
@@ -741,8 +741,8 @@ body.auto-board .auto-board-content {
 .board-event { border-color: var(--accent); box-shadow: none; }
 .board-event .board-event-tag { color: var(--accent); }
 /* 일반 전광판의 이벤트는 대화 카드보다 보조 안내로 작게 표시. */
-.board-event .title { font-size: clamp(.28rem, .6125vh, .4375rem); }
-.board-event .board-event-tag { font-size: clamp(.245rem, .455vh, .35rem); }
+.board-event .title { font-size: clamp(.4rem, .875vh, .625rem); }
+.board-event .board-event-tag { font-size: clamp(.35rem, .65vh, .5rem); }
 .board-empty { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; font-size: 3vh; color: var(--ink-soft); }
 /* 전광판 본문: 타임테이블(왼쪽) + QR 사이드바(오른쪽) 가로 분할 */
 .board-body { flex: 1 1 auto; min-height: 0; display: flex; gap: 1.5vw; }
