@@ -139,7 +139,8 @@ def test_lightning_application_admin_flow_and_private_data(client, admin_client,
     second_id = _add_light_session(admin_client, "2026-08-16")
     admin_client.post(f"/admin/light/{first_id}/update", data={
         "board_title": "오늘의 라이트닝 토크", "starts_at": "18:00",
-        "venue": "원흥관 3층", "description": "정규 세션 종료 후 진행",
+        "venue": "원흥관 3층", "venue_en": "Wonheung Hall 3F",
+        "description": "정규 세션 종료 후 진행",
     })
     admin_client.post("/admin/light/notice", data={
         "application_notice": "양일 공통 신청 안내입니다.",
@@ -184,9 +185,13 @@ def test_lightning_application_admin_flow_and_private_data(client, admin_client,
     assert "speaker@example.com" in admin_page and "자료 열기" in admin_page
     monkeypatch.setattr(light, "_today", lambda: date(2026, 8, 15))
     board = client.get("/light/board").text
-    assert "오늘의 라이트닝 토크" in board and "18시 00분" in board
-    assert "원흥관 3층" in board and "신청 안내" in board
+    assert "https://example.com/light-qr.png" in board
+    assert "오늘의 라이트닝 토크" not in board and "18시 00분" not in board
+    assert "원흥관 3층" not in board and "신청 안내" not in board
     assert "speaker@example.com" not in board and "나의 라이트닝 스토리" not in board
+    english_board = client.get("/light/board?board_lang=en").text
+    assert "PyCon Korea Lightning Talk" in english_board
+    assert "18:00" not in english_board and "Wonheung Hall 3F" not in english_board
 
 
 def test_admin_can_upload_lightning_qr_image(admin_client, client, monkeypatch):

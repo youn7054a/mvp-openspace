@@ -177,6 +177,7 @@ class LightningSession(SQLModel, table=True):
     board_title: str = ""  # 전광판 제목 (날짜별 설정, 비우면 기본 제목)
     starts_at: str = ""  # HH:MM, 정규 세션 종료 후 예정 시각
     venue: str = ""
+    venue_en: str = ""  # 영어 신청 화면·전광판용 장소
     description: str = ""
     application_notice: str = ""  # 참가자 신청 화면 안내
     is_open: bool = Field(default=True)

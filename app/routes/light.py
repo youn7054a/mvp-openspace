@@ -13,7 +13,7 @@ from starlette.datastructures import UploadFile
 from ..auth import identity_from_session, login_required_page, note_identity, resolve_identity
 from ..components import board_language_auto_switch, field, layout, notice
 from ..database import get_session
-from ..i18n import set_lang, t
+from ..i18n import get_lang, set_lang, t
 from ..models import LightningApplication, LightningQR, LightningSession, LightningSetting, LightningStatus, utcnow
 from ..queries import (board_language_interval, lightning_application_notice,
                        lightning_qrs, lightning_sessions)
@@ -46,12 +46,24 @@ def _today() -> date:
 
 
 def _time_label(value: str) -> str:
-    """HH:MM 저장값을 한국어 표시용 'H시 MM분'으로 바꾼다."""
+    """HH:MM 저장값을 요청 언어에 맞춰 표시한다."""
     try:
         hour, minute = (int(part) for part in (value or "").split(":", 1))
-        return f"{hour}시 {minute:02d}분"
+        return f"{hour:02d}:{minute:02d}" if get_lang() == "en" else f"{hour}시 {minute:02d}분"
     except (TypeError, ValueError):
         return value or ""
+
+
+def _date_label(value: date, *, include_year: bool = False) -> str:
+    """라이트닝 날짜를 한국어·영어 화면에 맞춰 표시한다."""
+    if get_lang() == "en":
+        return f"{value:%B} {value.day}, {value.year}" if include_year else f"{value:%B} {value.day}"
+    return f"{value:%Y년 %m월 %d일}" if include_year else f"{value:%m월 %d일}"
+
+
+def _venue_label(light_session) -> str:
+    return (light_session.venue_en if get_lang() == "en" and light_session.venue_en
+            else light_session.venue)
 
 
 _DEFAULT_APPLICATION_NOTICE_KO = """라이트닝토크 신청은 당일에만 가능하며 선착순 8명입니다.
@@ -109,8 +121,8 @@ def _light_form(light_session, application=None, default_name: str = ""):
         speaker_name = default_name
         status = None
     return Section(
-        H2(f"{light_session.session_date:%m}월 {light_session.session_date:%d}일 · {heading}"),
-        P(" · ".join(x for x in [_time_label(light_session.starts_at), light_session.venue] if x),
+        H2(f"{_date_label(light_session.session_date)} · {heading}"),
+        P(" · ".join(x for x in [_time_label(light_session.starts_at), _venue_label(light_session)] if x),
           cls="light-when"),
         P(light_session.description, cls="field-help") if light_session.description else None,
         status,
@@ -274,6 +286,8 @@ def register(app) -> None:
                      field(t("시작 예정 시각", "Start time"), "starts_at", value=item.starts_at,
                            input_type="time", required=False),
                      field(t("장소", "Venue"), "venue", value=item.venue, required=False),
+                     field(t("영문 장소", "Venue in English"), "venue_en", value=item.venue_en,
+                           required=False, placeholder="e.g. Room 4142, 4F New Engineering Building"),
                      field(t("안내 문구", "Board description"), "description", value=item.description,
                            textarea=True, required=False),
                      Button(t("설정 저장", "Save settings"), type="submit"), method="post",
@@ -367,7 +381,8 @@ def register(app) -> None:
 
     @app.post("/admin/light/{light_session_id}/update")
     def admin_light_update(session, light_session_id: int, board_title: str = "", starts_at: str = "",
-                           venue: str = "", description: str = "", application_notice: str = ""):
+                           venue: str = "", venue_en: str = "", description: str = "",
+                           application_notice: str = ""):
         if (redir := _require_admin(session)):
             return redir
         with get_session() as db:
@@ -375,6 +390,7 @@ def register(app) -> None:
             if item:
                 item.board_title = (board_title or "").strip()
                 item.starts_at, item.venue = (starts_at or "").strip(), (venue or "").strip()
+                item.venue_en = (venue_en or "").strip()
                 item.description, item.updated_at = (description or "").strip(), utcnow()
                 db.add(item); db.commit()
         return RedirectResponse("/admin/light", status_code=303)
@@ -505,26 +521,19 @@ def register(app) -> None:
             set_lang(board_lang)
         note_identity(identity_from_session(session))
         with get_session() as db:
-            # 신청을 닫아도 오늘의 전광판 안내(일시·장소·QR)는 계속 보여 준다.
-            item = next((row for row in lightning_sessions(db)
-                         if row.session_date == _today()), None)
+            # 전광판은 현장 신청 QR만 노출한다. 날짜별 운영 정보는 신청 화면에서만 사용.
             qrs = lightning_qrs(db)[:1]
             language_interval = board_language_interval(db)
-        board_title = item.board_title if item and item.board_title else t(
-            "파이콘 한국 라이트닝 토크", "PyCon Korea Lightning Talk")
-        cards = ([Section(
-                H2(f"{item.session_date:%Y년 %m월 %d일}"),
-                P(" · ".join(x for x in [_time_label(item.starts_at), item.venue] if x), cls="light-board-when"),
-                P(item.description or t("정규 세션 종료 후 진행됩니다.", "Held after the regular sessions."), cls="light-board-description"),
-                Div(P(t("라이트닝토크 신청", "Lightning Talk Application"), cls="light-board-qr-title"),
-                    *[Div(Img(src=qr.image_url, alt=qr.caption or "QR", cls="light-board-qr-img"),
-                             P(qr.caption, cls="light-board-qr-caption"), cls="light-board-qr") for qr in qrs],
-                    cls="light-board-qrs"), cls="light-board-card")]
-                 if item else [])
+        card = (Section(
+            Div(P(t("라이트닝토크 신청", "Lightning Talk Application"),
+                  cls="light-board-qr-title"),
+                *[Div(Img(src=qr.image_url, alt="QR", cls="light-board-qr-img"),
+                      cls="light-board-qr") for qr in qrs],
+                cls="light-board-qrs"),
+            cls="light-board-card",
+        ) if qrs else notice(t("현재 신청 QR 코드가 없습니다.", "No application QR code is available.")))
         return layout(t("라이트닝 토크", "Lightning Talk"),
-                      H1(board_title),
-                      P(t("현장 신청을 받습니다. 정규 세션 종료 후 진행됩니다.",
-                          "On-site applications are open. Held after the regular sessions."), cls="light-board-lead"),
-                      *(cards if cards else [notice(t("현재 안내할 라이트닝토크가 없습니다.", "No Lightning Talk is currently announced."))]),
+                      H1(t("파이콘 한국 라이트닝 토크", "PyCon Korea Lightning Talk")),
+                      card,
                       board_language_auto_switch(language_interval),
                       chrome=False, main_cls="light-board-content", body_cls="light-board")
