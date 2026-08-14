@@ -5,7 +5,7 @@ from sqlmodel import select
 
 from app.database import get_session
 from app.models import (
-    BoardQR, LightningApplication, LightningStatus, Room, RoomSlotClosure,
+    BoardQR, LightningApplication, LightningQR, LightningStatus, Room, RoomSlotClosure,
     Timeslot, Topic,
 )
 
@@ -106,14 +106,16 @@ def test_lightning_application_admin_flow_and_private_data(client, admin_client,
     admin_client.post(f"/admin/light/{first_id}/update", data={
         "board_title": "오늘의 라이트닝 토크", "starts_at": "18:00",
         "venue": "원흥관 3층", "description": "정규 세션 종료 후 진행",
-        "application_notice": "오늘만 현장 신청을 받습니다.",
     })
-    admin_client.post(f"/admin/light/{first_id}/qr", data={
+    admin_client.post("/admin/light/notice", data={
+        "application_notice": "양일 공통 신청 안내입니다.",
+    })
+    admin_client.post("/admin/light/board-qr", data={
         "image_url": "https://example.com/light-qr.png", "caption": "신청 안내", "sort_order": "1",
     })
 
     login(client, "speaker@example.com", pycon_id=101)
-    assert "오늘만 현장 신청을 받습니다." in client.get("/light").text
+    assert "양일 공통 신청 안내입니다." in client.get("/light").text
     application = client.post(f"/light/{first_id}/apply", data={
         "speaker_name": "발표자 별명", "title": "나의 라이트닝 스토리", "description": "짧은 발표",
         "presentation_url": "https://docs.google.com/presentation/d/test/edit",
@@ -146,10 +148,31 @@ def test_lightning_application_admin_flow_and_private_data(client, admin_client,
     # 관리자는 연락처·자료 URL을 보지만 공개 전광판에는 신청자·발표 자료를 싣지 않는다.
     admin_page = admin_client.get(f"/admin/light/applications?session_id={first_id}").text
     assert "speaker@example.com" in admin_page and "자료 열기" in admin_page
+    monkeypatch.setattr(light, "_today", lambda: date(2026, 8, 15))
     board = client.get("/light/board").text
     assert "오늘의 라이트닝 토크" in board and "18시 00분" in board
     assert "원흥관 3층" in board and "신청 안내" in board
     assert "speaker@example.com" not in board and "나의 라이트닝 스토리" not in board
+
+
+def test_admin_can_upload_lightning_qr_image(admin_client, client, monkeypatch):
+    from datetime import date
+    from app.routes import light
+
+    monkeypatch.setattr(light, "_today", lambda: date(2026, 8, 15))
+    session_id = _add_light_session(admin_client, "2026-08-15")
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+    resp = admin_client.post(
+        "/admin/light/board-qr",
+        data={"caption": "현장 신청", "sort_order": "1"},
+        files={"image_file": ("light-qr.png", png, "image/png")},
+    )
+    assert resp.status_code == 200
+    with get_session() as db:
+        qr = db.exec(select(LightningQR).where(
+            LightningQR.session_id == None)).first()  # noqa: E711
+        assert qr and qr.image_url.startswith("/uploads/")
+    assert qr.image_url in client.get("/light/board").text
 
 
 def test_optional_nickname_and_image_url(client):
@@ -831,17 +854,24 @@ def test_board_renders(client):
 
 
 def test_boards_switch_languages_every_15_seconds(client):
-    for path in ("/board", "/board2", "/light/board"):
+    for path in ("/board", "/board2", "/board3", "/light/board"):
         page = client.get(path).text
         assert "window.setTimeout" in page
-        assert "/lang/en?next=" in page
+        assert "board_lang" in page
         assert "15000" in page
+
+
+def test_board_language_rotation_does_not_change_site_language_cookie(client):
+    client.get("/lang/ko?next=/", follow_redirects=False)
+    board = client.get("/board?board_lang=en").text
+    assert "Display Board" in board
+    assert '<html lang="ko">' in client.get("/topics").text
 
 
 def test_admin_can_set_board_language_interval(client, admin_client):
     resp = admin_client.post("/admin/board/language", data={"interval_seconds": "30"})
     assert resp.status_code == 200  # 리다이렉트를 자동으로 따라간 관리자 화면
-    for path in ("/board", "/board2", "/light/board"):
+    for path in ("/board", "/board2", "/board3", "/light/board"):
         assert "30000" in client.get(path).text
 
 
@@ -871,16 +901,19 @@ def test_board2_renders_table_timetable(client, admin_client):
     assert "동시간 이벤트" in resp.text
     assert 'rowspan="2"' in resp.text
     assert "비어있습니다. 열린공간 주제를 넣어주세요!" in resp.text
-    assert 'hx-get="/board2/live"' in resp.text
+    assert 'hx-get="/board2/live?board_lang="' in resp.text
 
 
-def test_board2_shows_registered_qr(client, admin_client):
+def test_board3_shows_registered_qr(client, admin_client):
     admin_client.post("/admin/board/qr/1", data={
-        "image_url": "https://example.com/board2-qr.png", "caption": "행사 안내",
+        "image_url": "https://example.com/board2-qr.png", "caption": "주제 등록하기",
+        "caption_en": "Submit a topic",
     })
-    page = client.get("/board2").text
+    page = client.get("/board3").text
     assert "https://example.com/board2-qr.png" in page
-    assert "행사 안내" in page
+    assert "주제 등록하기" in page
+    assert "Submit a topic" in client.get("/board3?board_lang=en").text
+    assert "https://example.com/board2-qr.png" not in client.get("/board2").text
 
 
 def test_board_shows_full_timetable(client, admin_client):

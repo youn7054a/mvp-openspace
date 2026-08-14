@@ -7,6 +7,7 @@ from sqlmodel import Session, select
 
 from .models import (
     AutoBoardURL, BoardLanguageSetting, BoardQR, LightningApplication, LightningQR, LightningSession,
+    LightningSetting,
     Room, RoomSlotClosure, ScheduleEntry, Timeslot, Topic,
 )
 
@@ -136,6 +137,12 @@ def lightning_sessions(session: Session) -> list[LightningSession]:
     return list(session.exec(
         select(LightningSession).order_by(LightningSession.session_date, LightningSession.id)
     ))
+
+
+def lightning_application_notice(session: Session) -> str:
+    """라이트닝토크 양일에 공통으로 쓰는 신청 공지."""
+    setting = session.get(LightningSetting, 1)
+    return (setting.application_notice or "").strip() if setting else ""
 
 
 def lightning_qrs(session: Session, session_id: int | None = None) -> list[LightningQR]:

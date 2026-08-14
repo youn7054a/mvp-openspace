@@ -55,7 +55,7 @@ from ..auth import (
 )
 from ..config import get_settings
 from ..database import get_session
-from ..i18n import normalize_lang, t
+from ..i18n import get_lang, normalize_lang, set_lang, t
 from ..models import ScheduleEntry, Timeslot, Topic, TopicKind, utcnow
 from ..queries import (
     active_topics,
@@ -838,21 +838,23 @@ def register(app) -> None:
                                       admin_override=is_admin_email(identity))
 
     @app.get("/board")
-    def board(date: str = ""):
+    def board(date: str = "", board_lang: str = ""):
         # 전체 페이지는 한 번만 로드 — 이후 board-live 가 스스로 폴링하여 갱신
+        _apply_board_language(board_lang)
         with get_session() as db:
             language_interval = board_language_interval(db)
-        return layout(t("전광판", "Display Board"), _board_live(date),
+        return layout(t("전광판", "Display Board"), _board_live(date, board_lang),
                       board_language_auto_switch(language_interval), chrome=False)
 
     @app.get("/board2")
-    def board2():
+    def board2(board_lang: str = ""):
         """밝은 장소에서 보기 좋은 읽기 전용 테이블형 전광판 시간표."""
+        _apply_board_language(board_lang)
         with get_session() as db:
             language_interval = board_language_interval(db)
         return layout(
             t("열린공간 시간표", "OpenSpace Timetable"),
-            _board2_live(),
+            _board2_live(board_lang),
             board_language_auto_switch(language_interval),
             chrome=False,
             main_cls="content board2-content",
@@ -860,9 +862,30 @@ def register(app) -> None:
         )
 
     @app.get("/board2/live")
-    def board2_live():
+    def board2_live(board_lang: str = ""):
         # 전체 페이지를 다시 불러오지 않고 테이블만 주기적으로 갱신한다.
-        return _board2_live()
+        _apply_board_language(board_lang)
+        return _board2_live(board_lang)
+
+    @app.get("/board3")
+    def board3(board_lang: str = ""):
+        """열린공간 QR 코드만 크게 표시하는 전용 전광판."""
+        _apply_board_language(board_lang)
+        with get_session() as db:
+            language_interval = board_language_interval(db)
+        return layout(
+            t("열린공간 신청", "OpenSpace Application"),
+            _board3_live(board_lang),
+            board_language_auto_switch(language_interval),
+            chrome=False,
+            main_cls="content board3-content",
+            body_cls="board3",
+        )
+
+    @app.get("/board3/live")
+    def board3_live(board_lang: str = ""):
+        _apply_board_language(board_lang)
+        return _board3_live(board_lang)
 
     @app.get("/auto-board")
     def auto_board():
@@ -906,12 +929,19 @@ def register(app) -> None:
         )
 
     @app.get("/board/live")
-    def board_live(date: str = ""):
+    def board_live(date: str = "", board_lang: str = ""):
         # HTMX 폴링 대상 — board-live div 만 반환해 outerHTML 로 교체(깜빡임 없음)
-        return _board_live(date)
+        _apply_board_language(board_lang)
+        return _board_live(date, board_lang)
 
 
-def _board_live(date: str):
+def _apply_board_language(board_lang: str) -> None:
+    """전광판 URL의 언어만 요청 범위에 적용한다. 공용 언어 쿠키는 바꾸지 않는다."""
+    if board_lang in {"ko", "en"}:
+        set_lang(board_lang)
+
+
+def _board_live(date: str, board_lang: str = ""):
     """전광판 본문(자가 폴링 컨테이너) — 45초마다 HTMX 로 부드럽게 갱신.
 
     meta refresh(전체 리로드) 대신 이 div 만 outerHTML 로 교체하므로 깜빡임이 없다.
@@ -993,14 +1023,14 @@ def _board_live(date: str):
     return Div(
         head, board_body,
         id="board-live",
-        hx_get=f"/board/live?date={selected}",
+        hx_get=f"/board/live?date={selected}&board_lang={board_lang}",
         hx_trigger="every 45s",
         hx_target="this",
         hx_swap="outerHTML",
     )
 
 
-def _board2_live():
+def _board2_live(board_lang: str = ""):
     """테이블형 전광판 본문 — 45초마다 일정 데이터만 갱신한다."""
     with get_session() as session:
         rooms = all_rooms(session)
@@ -1009,7 +1039,6 @@ def _board2_live():
         closures = room_slot_closures(session)
         topics = topics_by_id(session)
         events = events_by_timeslot(session)
-        qrs = board_qrs(session)
 
     if not rooms or not timeslots:
         body = schedule_table(rooms, timeslots, slots, topics, events=events,
@@ -1029,11 +1058,6 @@ def _board2_live():
 
         body = date_tabs(days, render_day, id_prefix="b2day", panel_display="flex")
 
-    body_children = [body]
-    qr_side = _board_qr_strip(qrs)
-    if qr_side is not None:
-        body_children.append(qr_side)
-
     return Div(
         Div(
             H1(t("열린공간 시간표", "OpenSpace Timetable")),
@@ -1044,9 +1068,37 @@ def _board2_live():
             ),
             cls="board2-head",
         ),
-        Div(*body_children, cls="board2-body"),
+        Div(body, cls="board2-body"),
         id="board2-live",
-        hx_get="/board2/live",
+        hx_get=f"/board2/live?board_lang={board_lang}",
+        hx_trigger="every 45s",
+        hx_target="this",
+        hx_swap="outerHTML",
+    )
+
+
+def _board3_live(board_lang: str = ""):
+    """열린공간 공통 QR만 표시하는 전광판 본문."""
+    with get_session() as session:
+        qrs = board_qrs(session)
+    items = []
+    for slot, qr in sorted(qrs.items()):
+        if not qr.image_url:
+            continue
+        caption = qr.caption_en if get_lang() == "en" and qr.caption_en else qr.caption
+        items.append(Section(
+            H2(caption or t("열린공간 신청", "OpenSpace Application")),
+            Img(src=qr.image_url, alt=caption or f"QR {slot}", cls="board3-qr-img"),
+            cls="board3-qr-item",
+        ))
+    return Div(
+        H1(t("열린공간 신청", "OpenSpace Application")),
+        P(t("QR 코드를 스캔해 열린공간 주제를 등록해 주세요.",
+            "Scan the QR code to submit an OpenSpace topic."), cls="board3-lead"),
+        Div(*items, cls="board3-qr-grid") if items else notice(
+            t("등록된 QR 코드가 없습니다.", "No QR code has been registered.")),
+        id="board3-live",
+        hx_get=f"/board3/live?board_lang={board_lang}",
         hx_trigger="every 45s",
         hx_target="this",
         hx_swap="outerHTML",
@@ -1110,8 +1162,9 @@ def _board_qr_strip(qrs):
         if not qr.image_url:
             continue
         children = [Img(src=qr.image_url, alt=f"QR {slot}", cls="board-qr-img")]
-        if qr.caption:
-            children.append(Div(qr.caption, cls="board-qr-cap"))
+        caption = qr.caption_en if get_lang() == "en" and qr.caption_en else qr.caption
+        if caption:
+            children.append(Div(caption, cls="board-qr-cap"))
         items.append(Div(*children, cls="board-qr-item"))
     if not items:
         return None

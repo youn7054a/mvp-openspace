@@ -247,8 +247,9 @@ def board_language_auto_switch(seconds: int = 15):
     next_lang = "en" if get_lang() == "ko" else "ko"
     return Script(
         "window.setTimeout(function(){"
-        f"window.location.replace('/lang/{next_lang}?next='+"
-        "encodeURIComponent(window.location.pathname+window.location.search));"
+        "const url=new URL(window.location.href);"
+        f"url.searchParams.set('board_lang','{next_lang}');"
+        "window.location.replace(url.pathname+url.search+url.hash);"
         f"}},{seconds * 1000});"
     )
 

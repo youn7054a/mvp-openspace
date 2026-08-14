@@ -254,6 +254,7 @@ def _qr_form(slot: int, qr):
     """전광판 QR 한 슬롯 등록 폼 (image upload/URL + caption)."""
     img = qr.image_url if qr else None
     caption = qr.caption if qr else ""
+    caption_en = qr.caption_en if qr else ""
     inner = []
     if img:
         inner.append(Div(
@@ -276,6 +277,9 @@ def _qr_form(slot: int, qr):
             Input(id=f"qr{slot}-caption", name="caption", value=caption,
                   placeholder=t("예: 행사 안내 / 설문 링크", "e.g. event info / survey link"),
                   required=False), cls="field"),
+        Div(Label(t("영문 설명", "English caption"), fr=f"qr{slot}-caption-en"),
+            Input(id=f"qr{slot}-caption-en", name="caption_en", value=caption_en,
+                  placeholder="e.g. Submit a topic / Topic list", required=False), cls="field"),
         Button(t("저장", "Save"), type="submit"),
     ]
     children = [
@@ -773,7 +777,7 @@ def register(app) -> None:
         return RedirectResponse("/admin/board", status_code=303)
 
     @app.post("/admin/board/qr/{slot}")
-    async def admin_board_qr_save(session, slot: int, caption: str = "",
+    async def admin_board_qr_save(session, slot: int, caption: str = "", caption_en: str = "",
                                   image_url: str = "", remove_image: str = "",
                                   image_file: UploadFile = None):
         if (redir := _require_admin(session)):
@@ -801,6 +805,7 @@ def register(app) -> None:
                 qr.image_url = None
                 delete_local_image(old_url)
             qr.caption = (caption or "").strip()
+            qr.caption_en = (caption_en or "").strip()
             qr.updated_at = utcnow()
             db.add(qr)
             db.commit()
