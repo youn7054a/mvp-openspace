@@ -241,6 +241,19 @@ def lang_toggle():
     )
 
 
+def board_language_auto_switch(seconds: int = 15):
+    """전광판을 한국어·영어로 지정 시간마다 교대 표시한다."""
+    seconds = max(5, min(int(seconds), 3600))
+    next_lang = "en" if get_lang() == "ko" else "ko"
+    return Script(
+        "window.setTimeout(function(){"
+        "const url=new URL(window.location.href);"
+        f"url.searchParams.set('board_lang','{next_lang}');"
+        "window.location.replace(url.pathname+url.search+url.hash);"
+        f"}},{seconds * 1000});"
+    )
+
+
 def layout(title: str, *content, auto_refresh: int | None = None,
            chrome: bool = True, active: str | None = None, main_cls: str = "content",
            body_cls: str | None = None):

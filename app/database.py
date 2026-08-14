@@ -38,6 +38,7 @@ def init_db() -> None:
     SQLModel.metadata.create_all(engine)
     _migrate_topic_kind_and_event_schedule()
     _migrate_lightning_session()
+    _migrate_board_qr()
 
 
 def _column_names(conn, table: str) -> dict[str, dict]:
@@ -131,6 +132,20 @@ def _migrate_lightning_session() -> None:
         if cols and "application_notice" not in cols:
             conn.execute(text(
                 "ALTER TABLE lightningsession ADD COLUMN application_notice VARCHAR NOT NULL DEFAULT ''"
+            ))
+
+
+def _migrate_board_qr() -> None:
+    """기존 전광판 QR에 영어 설명 컬럼을 추가한다."""
+    if not settings.database_url.startswith("sqlite"):
+        return
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        cols = _column_names(conn, "boardqr")
+        if cols and "caption_en" not in cols:
+            conn.execute(text(
+                "ALTER TABLE boardqr ADD COLUMN caption_en VARCHAR NOT NULL DEFAULT ''"
             ))
 
 

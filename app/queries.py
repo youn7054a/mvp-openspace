@@ -6,7 +6,8 @@ from datetime import date, timedelta
 from sqlmodel import Session, select
 
 from .models import (
-    AutoBoardURL, BoardQR, LightningApplication, LightningQR, LightningSession,
+    AutoBoardURL, BoardLanguageSetting, BoardQR, LightningApplication, LightningQR, LightningSession,
+    LightningSetting,
     Room, RoomSlotClosure, ScheduleEntry, Timeslot, Topic,
 )
 
@@ -118,6 +119,12 @@ def board_qrs(session: Session) -> dict[int, BoardQR]:
     return {q.slot: q for q in session.exec(select(BoardQR))}
 
 
+def board_language_interval(session: Session) -> int:
+    """전광판 언어별 표시 시간. 설정 전에는 기본 15초."""
+    setting = session.get(BoardLanguageSetting, 1)
+    return setting.interval_seconds if setting else 15
+
+
 def auto_board_urls(session: Session) -> list[AutoBoardURL]:
     """자동 전광판 URL을 관리자가 지정한 순서대로 반환한다."""
     return list(session.exec(
@@ -130,6 +137,12 @@ def lightning_sessions(session: Session) -> list[LightningSession]:
     return list(session.exec(
         select(LightningSession).order_by(LightningSession.session_date, LightningSession.id)
     ))
+
+
+def lightning_application_notice(session: Session) -> str:
+    """라이트닝토크 양일에 공통으로 쓰는 신청 공지."""
+    setting = session.get(LightningSetting, 1)
+    return (setting.application_notice or "").strip() if setting else ""
 
 
 def lightning_qrs(session: Session, session_id: int | None = None) -> list[LightningQR]:

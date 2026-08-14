@@ -7,13 +7,16 @@ from urllib.parse import urlparse
 from fasthtml.common import A, Button, Div, Form, H1, H2, Img, Input, P, RedirectResponse, Section, Table, Td, Th, Thead, Tr
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
+from starlette.datastructures import UploadFile
 
 from ..auth import identity_from_session, login_required_page, note_identity, resolve_identity
-from ..components import field, layout, notice
+from ..components import board_language_auto_switch, field, layout, notice
 from ..database import get_session
-from ..i18n import t
-from ..models import LightningApplication, LightningQR, LightningSession, LightningStatus, utcnow
-from ..queries import lightning_qrs, lightning_sessions
+from ..i18n import set_lang, t
+from ..models import LightningApplication, LightningQR, LightningSession, LightningSetting, LightningStatus, utcnow
+from ..queries import (board_language_interval, lightning_application_notice,
+                       lightning_qrs, lightning_sessions)
+from ..uploads import UploadError, delete_local_image, normalize_image_url, save_image
 
 
 def _admin_layout(title, *content):
@@ -48,6 +51,21 @@ def _time_label(value: str) -> str:
         return f"{hour}시 {minute:02d}분"
     except (TypeError, ValueError):
         return value or ""
+
+
+_DEFAULT_APPLICATION_NOTICE_KO = """라이트닝토크 신청은 당일에만 가능하며 선착순 8명입니다.
+16:30분에 메일로 합격 여부가 나갑니다.
+신청 시에는 문서가 없어도 되나, 발표 시에는 있어야 합니다 (구글 슬라이드, PDF).
+진행 장소와 시간: 신공학관 4층 4142호 17:20 ~ 18:00"""
+_DEFAULT_APPLICATION_NOTICE_EN = """Lightning Talk applications are available on the day only, with up to eight applicants.
+Acceptance results are sent by email at 16:30.
+Presentation material is not required when applying, but is required for presenting (Google Slides or PDF).
+Venue and time: Room 4142, 4F New Engineering Building, 17:20–18:00."""
+
+
+def _application_notice(value: str = "") -> str:
+    return (value or "").strip() or t(_DEFAULT_APPLICATION_NOTICE_KO,
+                                        _DEFAULT_APPLICATION_NOTICE_EN)
 
 
 def _application_for(db, session_id: int, identity):
@@ -175,6 +193,7 @@ def register(app) -> None:
             sessions = [item for item in lightning_sessions(db)
                         if item.is_open and item.session_date == _today()]
             applications = {item.id: _application_for(db, item.id, identity) for item in sessions}
+            application_notice = lightning_application_notice(db)
         default_name = identity.username or identity.email.split("@")[0]
         body = [_light_form(item, applications[item.id], default_name) for item in sessions]
         if not body:
@@ -182,10 +201,7 @@ def register(app) -> None:
                              "Lightning Talk applications are available only on the event day."))]
         return layout(t("라이트닝토크", "Lightning Talk"),
                       H1(t("라이트닝토크 신청", "Lightning Talk Application")),
-                      *([P(sessions[0].application_notice or t(
-                          "당일 신청을 받습니다. 최종 참여 여부는 내부 운영 기준에 따라 결정됩니다.",
-                          "Applications are accepted on the day. Final participation follows internal operating guidelines."),
-                          cls="light-application-notice")] if sessions else []),
+                      P(_application_notice(application_notice), cls="light-application-notice"),
                       *body, active="/light")
 
     @app.post("/light/{light_session_id}/apply")
@@ -245,23 +261,15 @@ def register(app) -> None:
             return redir
         with get_session() as db:
             sessions = lightning_sessions(db)
-            qrs = {item.id: lightning_qrs(db, item.id) for item in sessions}
+            common_qrs = lightning_qrs(db)[:1]
+            application_notice = lightning_application_notice(db)
         parts = []
         for item in sessions:
-            qr_forms = [Div(Img(src=qr.image_url, alt=qr.caption or "QR", cls="light-qr-preview"),
-                            P(qr.caption or "—"),
-                            Form(Button(t("삭제", "Delete"), type="submit", cls="danger"),
-                                 method="post", action=f"/admin/light/qr/{qr.id}/delete"), cls="qr-block")
-                        for qr in qrs[item.id]]
             parts.append(Section(
                 H2(f"{item.session_date:%Y.%m.%d} · {t('신청 열림', 'Open') if item.is_open else t('신청 닫힘', 'Closed')}"),
                 Form(field(t("전광판 제목", "Board title"), "board_title", value=item.board_title,
                            required=False,
                            placeholder=t("예: 파이콘 한국 라이트닝 토크", "e.g. PyCon Korea Lightning Talk")),
-                     field(t("신청 안내 문구", "Application notice"), "application_notice",
-                           value=item.application_notice, textarea=True, required=False,
-                           placeholder=t("예: 당일 신청을 받습니다. 최종 참여 여부는 내부 운영 기준에 따라 결정됩니다.",
-                                         "e.g. Applications are accepted on the day.")),
                      field(t("시작 예정 시각", "Start time"), "starts_at", value=item.starts_at,
                            input_type="time", required=False),
                      field(t("장소", "Venue"), "venue", value=item.venue, required=False),
@@ -273,18 +281,41 @@ def register(app) -> None:
                             type="submit", cls="secondary"), method="post", action=f"/admin/light/{item.id}/toggle"),
                 P(A(t("이 날짜의 신청 목록 보기", "View applications for this date"),
                     href=f"/admin/light/applications?session_id={item.id}", cls="btn secondary")),
-                H2(t("전광판 QR", "Board QR")),
-                Div(*qr_forms, cls="qr-grid"),
-                Form(field(t("QR 이미지 URL", "QR image URL"), "image_url", placeholder="https://..."),
-                     field(t("설명", "Caption"), "caption", required=False),
-                     field(t("정렬 순서", "Sort order"), "sort_order", value="0", input_type="number", required=False),
-                     Button(t("QR 추가", "Add QR"), type="submit"), method="post",
-                     action=f"/admin/light/{item.id}/qr"), cls="light-admin-session"))
+                cls="light-admin-session"))
         return _admin_layout(t("라이트닝토크", "Lightning Talk"),
                              H2(t("라이트닝토크 날짜 추가", "Add Lightning Talk Date")),
                              Form(field(t("날짜", "Date"), "session_date", input_type="date"),
                                   Button(t("날짜 추가", "Add date"), type="submit"), method="post", action="/admin/light"),
                              P(A(t("라이트닝 전광판 열기", "Open Lightning Board"), href="/light/board", target="_blank", cls="btn secondary")),
+                             Section(
+                                 H2(t("공통 신청 공지", "Shared application notice")),
+                                 P(t("15일·16일 신청 화면에 같은 공지가 표시됩니다.",
+                                     "The same notice appears on both application dates."), cls="field-help"),
+                                 Form(field(t("공지", "Notice"), "application_notice",
+                                            value=_application_notice(application_notice), textarea=True,
+                                            required=False),
+                                      Button(t("공지 저장", "Save notice"), type="submit"), method="post",
+                                      action="/admin/light/notice"),
+                             ),
+                             Section(
+                                 H2(t("공통 신청 QR", "Shared application QR")),
+                                 P(t("당일 라이트닝 전광판에만 표시되는 QR 코드입니다.",
+                                     "This QR code appears on the current-day Lightning Talk board."),
+                                   cls="field-help"),
+                                 Div(*[Div(Img(src=qr.image_url, alt=qr.caption or "QR",
+                                                cls="light-qr-preview"),
+                                            P(qr.caption or "—"),
+                                            Form(Button(t("삭제", "Delete"), type="submit", cls="danger"),
+                                                 method="post", action=f"/admin/light/qr/{qr.id}/delete"),
+                                            cls="qr-block") for qr in common_qrs], cls="qr-grid"),
+                                 Form(field(t("QR 이미지 파일", "QR image file"), "image_file",
+                                            input_type="file", required=False),
+                                      field(t("또는 QR 이미지 URL", "Or QR image URL"), "image_url",
+                                            placeholder="https://...", required=False),
+                                      field(t("설명", "Caption"), "caption", required=False),
+                                      Button(t("QR 저장", "Save QR"), type="submit"), method="post",
+                                      action="/admin/light/board-qr", enctype="multipart/form-data"),
+                             ),
                              *parts)
 
     @app.get("/admin/light/applications")
@@ -342,10 +373,21 @@ def register(app) -> None:
             item = db.get(LightningSession, light_session_id)
             if item:
                 item.board_title = (board_title or "").strip()
-                item.application_notice = (application_notice or "").strip()
                 item.starts_at, item.venue = (starts_at or "").strip(), (venue or "").strip()
                 item.description, item.updated_at = (description or "").strip(), utcnow()
                 db.add(item); db.commit()
+        return RedirectResponse("/admin/light", status_code=303)
+
+    @app.post("/admin/light/notice")
+    def admin_light_notice(session, application_notice: str = ""):
+        if (redir := _require_admin(session)):
+            return redir
+        with get_session() as db:
+            setting = db.get(LightningSetting, 1) or LightningSetting(id=1)
+            setting.application_notice = (application_notice or "").strip()
+            setting.updated_at = utcnow()
+            db.add(setting)
+            db.commit()
         return RedirectResponse("/admin/light", status_code=303)
 
     @app.post("/admin/light/{light_session_id}/toggle")
@@ -404,15 +446,45 @@ def register(app) -> None:
         return RedirectResponse(f"/admin/light/applications?session_id={session_id}", status_code=303)
 
     @app.post("/admin/light/{light_session_id}/qr")
-    def admin_light_qr(session, light_session_id: int, image_url: str, caption: str = "", sort_order: int = 0):
+    async def admin_light_qr(session, light_session_id: int, image_url: str = "", caption: str = "",
+                             sort_order: int = 0, image_file: UploadFile = None):
         if (redir := _require_admin(session)):
             return redir
-        image_url = _valid_material_url(image_url)
+        try:
+            image_url = await save_image(image_file) or normalize_image_url(image_url)
+        except UploadError as exc:
+            return _admin_layout(t("라이트닝토크", "Lightning Talk"),
+                                 notice(str(exc), kind="error"),
+                                 A(t("돌아가기", "Back"), href="/admin/light", cls="btn secondary"))
         if image_url:
             with get_session() as db:
                 db.add(LightningQR(session_id=light_session_id, image_url=image_url,
                                    caption=(caption or "").strip(), sort_order=sort_order))
                 db.commit()
+        return RedirectResponse("/admin/light", status_code=303)
+
+    @app.post("/admin/light/board-qr")
+    async def admin_light_board_qr(session, image_url: str = "", caption: str = "",
+                                   image_file: UploadFile = None):
+        """양일 공통의 단일 신청 QR을 저장한다."""
+        if (redir := _require_admin(session)):
+            return redir
+        try:
+            new_url = await save_image(image_file) or normalize_image_url(image_url)
+        except UploadError as exc:
+            return _admin_layout(t("라이트닝토크", "Lightning Talk"),
+                                 notice(str(exc), kind="error"),
+                                 A(t("돌아가기", "Back"), href="/admin/light", cls="btn secondary"))
+        if new_url:
+            with get_session() as db:
+                qr = lightning_qrs(db)[0] if lightning_qrs(db) else LightningQR(session_id=None,
+                                                                                  image_url=new_url)
+                old_url = qr.image_url
+                qr.image_url, qr.caption, qr.updated_at = new_url, (caption or "").strip(), utcnow()
+                db.add(qr)
+                db.commit()
+                if old_url != new_url:
+                    delete_local_image(old_url)
         return RedirectResponse("/admin/light", status_code=303)
 
     @app.post("/admin/light/qr/{qr_id}/delete")
@@ -422,31 +494,36 @@ def register(app) -> None:
         with get_session() as db:
             qr = db.get(LightningQR, qr_id)
             if qr:
+                delete_local_image(qr.image_url)
                 db.delete(qr); db.commit()
         return RedirectResponse("/admin/light", status_code=303)
 
     @app.get("/light/board")
-    def light_board(session):
+    def light_board(session, board_lang: str = ""):
+        if board_lang in {"ko", "en"}:
+            set_lang(board_lang)
         note_identity(identity_from_session(session))
         with get_session() as db:
-            # 신청을 닫아도 전광판 안내(일시·장소·QR)는 계속 보여 준다.
-            sessions = lightning_sessions(db)
-            qr_map = {item.id: lightning_qrs(db, item.id) for item in sessions}
-        board_title = next((item.board_title for item in sessions if item.board_title),
-                           t("파이콘 한국 라이트닝 토크", "PyCon Korea Lightning Talk"))
-        cards = []
-        for item in sessions:
-            qrs = qr_map[item.id]
-            cards.append(Section(
+            # 신청을 닫아도 오늘의 전광판 안내(일시·장소·QR)는 계속 보여 준다.
+            item = next((row for row in lightning_sessions(db)
+                         if row.session_date == _today()), None)
+            qrs = lightning_qrs(db)[:1]
+            language_interval = board_language_interval(db)
+        board_title = item.board_title if item and item.board_title else t(
+            "파이콘 한국 라이트닝 토크", "PyCon Korea Lightning Talk")
+        cards = ([Section(
                 H2(f"{item.session_date:%Y년 %m월 %d일}"),
                 P(" · ".join(x for x in [_time_label(item.starts_at), item.venue] if x), cls="light-board-when"),
                 P(item.description or t("정규 세션 종료 후 진행됩니다.", "Held after the regular sessions."), cls="light-board-description"),
-                Div(*[Div(Img(src=qr.image_url, alt=qr.caption or "QR", cls="light-board-qr-img"),
+                Div(P(t("라이트닝토크 신청", "Lightning Talk Application"), cls="light-board-qr-title"),
+                    *[Div(Img(src=qr.image_url, alt=qr.caption or "QR", cls="light-board-qr-img"),
                              P(qr.caption, cls="light-board-qr-caption"), cls="light-board-qr") for qr in qrs],
-                    cls="light-board-qrs"), cls="light-board-card"))
+                    cls="light-board-qrs"), cls="light-board-card")]
+                 if item else [])
         return layout(t("라이트닝 토크", "Lightning Talk"),
                       H1(board_title),
                       P(t("현장 신청을 받습니다. 정규 세션 종료 후 진행됩니다.",
                           "On-site applications are open. Held after the regular sessions."), cls="light-board-lead"),
                       *(cards if cards else [notice(t("현재 안내할 라이트닝토크가 없습니다.", "No Lightning Talk is currently announced."))]),
+                      board_language_auto_switch(language_interval),
                       chrome=False, main_cls="light-board-content", body_cls="light-board")

@@ -136,7 +136,16 @@ class BoardQR(SQLModel, table=True):
     slot: int = Field(index=True)  # 1 또는 2
     image_url: Optional[str] = Field(default=None)  # QR 이미지 (업로드 또는 URL)
     caption: str = Field(default="")  # QR 설명 (예: 행사 안내, 설문)
+    caption_en: str = Field(default="")  # 영어 전광판용 설명
     created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class BoardLanguageSetting(SQLModel, table=True):
+    """전광판 한·영 자동 전환 설정 (단일 행, id=1)."""
+
+    id: int = Field(default=1, primary_key=True)
+    interval_seconds: int = Field(default=15)
     updated_at: datetime = Field(default_factory=utcnow)
 
 
@@ -172,6 +181,14 @@ class LightningSession(SQLModel, table=True):
     application_notice: str = ""  # 참가자 신청 화면 안내
     is_open: bool = Field(default=True)
     created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class LightningSetting(SQLModel, table=True):
+    """라이트닝토크 전체 공통 설정 (단일 행, id=1)."""
+
+    id: int = Field(default=1, primary_key=True)
+    application_notice: str = ""
     updated_at: datetime = Field(default_factory=utcnow)
 
 
