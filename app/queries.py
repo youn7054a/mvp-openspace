@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from sqlmodel import Session, select
 
 from .models import (
-    AutoBoardURL, BoardQR, LightningApplication, LightningQR, LightningSession,
+    AutoBoardURL, BoardLanguageSetting, BoardQR, LightningApplication, LightningQR, LightningSession,
     Room, RoomSlotClosure, ScheduleEntry, Timeslot, Topic,
 )
 
@@ -116,6 +116,12 @@ def get_owned_topic(session: Session, topic_id: int, identity) -> Topic | None:
 def board_qrs(session: Session) -> dict[int, BoardQR]:
     """전광판 QR 슬롯 매핑 (slot -> BoardQR). 슬롯 수는 제한하지 않는다."""
     return {q.slot: q for q in session.exec(select(BoardQR))}
+
+
+def board_language_interval(session: Session) -> int:
+    """전광판 언어별 표시 시간. 설정 전에는 기본 15초."""
+    setting = session.get(BoardLanguageSetting, 1)
+    return setting.interval_seconds if setting else 15
 
 
 def auto_board_urls(session: Session) -> list[AutoBoardURL]:

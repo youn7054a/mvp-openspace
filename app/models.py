@@ -140,6 +140,14 @@ class BoardQR(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class BoardLanguageSetting(SQLModel, table=True):
+    """전광판 한·영 자동 전환 설정 (단일 행, id=1)."""
+
+    id: int = Field(default=1, primary_key=True)
+    interval_seconds: int = Field(default=15)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class AutoBoardURL(SQLModel, table=True):
     """자동 전광판에 순서대로 표시할 URL 한 개."""
 

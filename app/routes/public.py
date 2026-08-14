@@ -33,6 +33,7 @@ from starlette.datastructures import UploadFile
 
 from ..components import (
     account_field,
+    board_language_auto_switch,
     date_tabs,
     fmt_day_short,
     layout,
@@ -61,6 +62,7 @@ from ..queries import (
     all_rooms,
     all_timeslots,
     board_qrs,
+    board_language_interval,
     auto_board_urls,
     entry_for_topic,
     events_by_timeslot,
@@ -838,14 +840,20 @@ def register(app) -> None:
     @app.get("/board")
     def board(date: str = ""):
         # 전체 페이지는 한 번만 로드 — 이후 board-live 가 스스로 폴링하여 갱신
-        return layout(t("전광판", "Display Board"), _board_live(date), chrome=False)
+        with get_session() as db:
+            language_interval = board_language_interval(db)
+        return layout(t("전광판", "Display Board"), _board_live(date),
+                      board_language_auto_switch(language_interval), chrome=False)
 
     @app.get("/board2")
     def board2():
         """밝은 장소에서 보기 좋은 읽기 전용 테이블형 전광판 시간표."""
+        with get_session() as db:
+            language_interval = board_language_interval(db)
         return layout(
             t("열린공간 시간표", "OpenSpace Timetable"),
             _board2_live(),
+            board_language_auto_switch(language_interval),
             chrome=False,
             main_cls="content board2-content",
             body_cls="board2",

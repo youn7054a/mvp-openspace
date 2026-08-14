@@ -830,6 +830,21 @@ def test_board_renders(client):
     assert "전광판" in resp.text
 
 
+def test_boards_switch_languages_every_15_seconds(client):
+    for path in ("/board", "/board2", "/light/board"):
+        page = client.get(path).text
+        assert "window.setTimeout" in page
+        assert "/lang/en?next=" in page
+        assert "15000" in page
+
+
+def test_admin_can_set_board_language_interval(client, admin_client):
+    resp = admin_client.post("/admin/board/language", data={"interval_seconds": "30"})
+    assert resp.status_code == 200  # 리다이렉트를 자동으로 따라간 관리자 화면
+    for path in ("/board", "/board2", "/light/board"):
+        assert "30000" in client.get(path).text
+
+
 def test_board2_renders_table_timetable(client, admin_client):
     room_id, timeslot_id = _seed_room_and_slot(admin_client)
     admin_client.post("/admin/rooms", data={"name": "Room B", "sort_order": "1"})

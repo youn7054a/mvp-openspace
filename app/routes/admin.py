@@ -39,11 +39,12 @@ from starlette.datastructures import UploadFile
 from ..components import field, layout, notice
 from ..database import get_session
 from ..i18n import t
-from ..models import AutoBoardURL, BoardQR, Room, RoomSlotClosure, ScheduleEntry, Timeslot, Topic, utcnow
+from ..models import AutoBoardURL, BoardLanguageSetting, BoardQR, Room, RoomSlotClosure, ScheduleEntry, Timeslot, Topic, utcnow
 from ..queries import (
     all_rooms,
     all_timeslots,
     auto_board_urls,
+    board_language_interval,
     board_qrs,
     entry_for_topic,
     schedule_map,
@@ -731,6 +732,7 @@ def register(app) -> None:
             return redir
         with get_session() as db:
             qrs = board_qrs(db)
+            language_interval = board_language_interval(db)
         return _admin_layout(
             t("전광판 QR", "Board QR"),
             H2(t("전광판 QR 코드", "Display-board QR")),
@@ -738,10 +740,37 @@ def register(app) -> None:
                 "넣을 수 있어요. 이미지가 없는 QR은 전광판에 표시되지 않습니다.",
                 "Register as many QR codes as needed. QR codes without an image are hidden."),
               cls="field-help"),
+            Section(
+                H2(t("언어 자동 전환", "Automatic language switching")),
+                P(t("전광판은 한국어와 영어를 같은 시간만큼 번갈아 표시합니다.",
+                    "Display boards alternate Korean and English for the same duration."),
+                  cls="field-help"),
+                Form(
+                    Label(t("언어별 표시 시간(초)", "Seconds per language"),
+                          Input(name="interval_seconds", type="number", min="5", max="3600",
+                                value=str(language_interval), required=True)),
+                    Button(t("저장", "Save"), type="submit"),
+                    method="post", action="/admin/board/language", cls="inline-form",
+                ),
+                cls="admin-section",
+            ),
             Div(*[
                 _qr_form(slot, qrs.get(slot)) for slot in sorted(qrs)
             ], _qr_form(max(qrs, default=0) + 1, None), cls="qr-grid"),
         )
+
+    @app.post("/admin/board/language")
+    def admin_board_language_save(session, interval_seconds: int = 15):
+        if (redir := _require_admin(session)):
+            return redir
+        interval_seconds = max(5, min(interval_seconds, 3600))
+        with get_session() as db:
+            setting = db.get(BoardLanguageSetting, 1) or BoardLanguageSetting(id=1)
+            setting.interval_seconds = interval_seconds
+            setting.updated_at = utcnow()
+            db.add(setting)
+            db.commit()
+        return RedirectResponse("/admin/board", status_code=303)
 
     @app.post("/admin/board/qr/{slot}")
     async def admin_board_qr_save(session, slot: int, caption: str = "",

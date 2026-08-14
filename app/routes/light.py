@@ -9,11 +9,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
 from ..auth import identity_from_session, login_required_page, note_identity, resolve_identity
-from ..components import field, layout, notice
+from ..components import board_language_auto_switch, field, layout, notice
 from ..database import get_session
 from ..i18n import t
 from ..models import LightningApplication, LightningQR, LightningSession, LightningStatus, utcnow
-from ..queries import lightning_qrs, lightning_sessions
+from ..queries import board_language_interval, lightning_qrs, lightning_sessions
 
 
 def _admin_layout(title, *content):
@@ -432,6 +432,7 @@ def register(app) -> None:
             # 신청을 닫아도 전광판 안내(일시·장소·QR)는 계속 보여 준다.
             sessions = lightning_sessions(db)
             qr_map = {item.id: lightning_qrs(db, item.id) for item in sessions}
+            language_interval = board_language_interval(db)
         board_title = next((item.board_title for item in sessions if item.board_title),
                            t("파이콘 한국 라이트닝 토크", "PyCon Korea Lightning Talk"))
         cards = []
@@ -449,4 +450,5 @@ def register(app) -> None:
                       P(t("현장 신청을 받습니다. 정규 세션 종료 후 진행됩니다.",
                           "On-site applications are open. Held after the regular sessions."), cls="light-board-lead"),
                       *(cards if cards else [notice(t("현재 안내할 라이트닝토크가 없습니다.", "No Lightning Talk is currently announced."))]),
+                      board_language_auto_switch(language_interval),
                       chrome=False, main_cls="light-board-content", body_cls="light-board")
