@@ -345,7 +345,7 @@ def schedule_table(rooms, timeslots, slots, topics, *, events=None,
                    empty_notice=None, show_descriptions: bool = False,
                    show_background_images: bool = False,
                    merge_event_time: bool = False, open_label: str | None = None,
-                   room_closures=None):
+                   room_closures=None, hide_fully_closed_rows: bool = False):
     """룸×타임슬롯 격자 표 (Room×timeslot grid table).
 
     slots: (room_id, timeslot_id) -> ScheduleEntry. topics: id -> Topic.
@@ -355,6 +355,7 @@ def schedule_table(rooms, timeslots, slots, topics, *, events=None,
     show_background_images=True 이면 세션 대표 이미지를 셀 배경으로 표시한다.
     merge_event_time=True 이면 이벤트와 같은 시간대의 시간 칸을 세로로 병합한다.
     open_label: 빈 슬롯에 표시할 안내 문구. 생략 시 기본 문구를 표시한다.
+    hide_fully_closed_rows=True이면 모든 룸이 닫힌 시간의 대화 행은 숨긴다.
     """
     if not rooms or not timeslots:
         return empty_notice or notice(t(
@@ -368,11 +369,17 @@ def schedule_table(rooms, timeslots, slots, topics, *, events=None,
     for ts in timeslots:
         # 이벤트(시간만 등록)는 룸 칸들 위 전체폭 배너 줄로 — 여러 개면 여러 줄.
         slot_events = events.get(ts.id, [])
+        fully_closed = bool(rooms) and all((room.id, ts.id) in room_closures for room in rooms)
+        if hide_fully_closed_rows and fully_closed and not slot_events:
+            continue
         merge_time_cell = merge_event_time and bool(slot_events)
         for i, ev in enumerate(slot_events):
             cells = []
             if not merge_time_cell or i == 0:
-                time_attrs = {"rowspan": len(slot_events) + 1} if merge_time_cell else {}
+                row_count = len(slot_events) + (
+                    0 if hide_fully_closed_rows and fully_closed and not ts.is_closed else 1
+                )
+                time_attrs = {"rowspan": row_count} if merge_time_cell else {}
                 cells.append(Th(ts.time_label, scope="row", **time_attrs))
             event_children = [
                 Div(Span(t("이벤트", "Event"), cls="kind-badge is-event"),
@@ -387,6 +394,9 @@ def schedule_table(rooms, timeslots, slots, topics, *, events=None,
             cells = [] if merge_time_cell else [Th(ts.time_label, scope="row")]
             cells.append(Td(ts.closed_label, colspan=len(rooms), cls="slot-closed"))
             rows.append(Tr(*cells))
+            continue
+        if hide_fully_closed_rows and fully_closed:
+            # 이벤트 배너는 위에서 이미 추가했으며, 닫힌 대화 행만 감춘다.
             continue
         cells = [] if merge_time_cell else [Th(ts.time_label, scope="row")]
         for room in rooms:

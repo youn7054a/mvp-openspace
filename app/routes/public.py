@@ -966,11 +966,17 @@ def _board_live(date: str, board_lang: str = ""):
     for ts in timeslots:
         # 이벤트(시간만)는 룸 카드들 위에 전체폭 배너 카드로 — 여러 개면 여러 줄.
         ev_banners = [_board_event_card(ev) for ev in events.get(ts.id, [])]
+        fully_closed = bool(rooms) and all((room_id, ts.id) in closures for room_id in rooms)
+        if fully_closed and not ev_banners:
+            continue
         if ts.is_closed:
             # 닫힌 슬롯(키노트·휴식 등)도 카드 한 장으로 표시 — 세션 행과 비슷한 비중
             body = Div(Article(Div(ts.closed_label, cls="title"),
                                cls="board-session board-closed"), cls="board-grid")
             weight = 2.2
+        elif fully_closed:
+            # 대화 슬롯은 모두 닫혔지만 이벤트 안내는 표시한다.
+            body, weight = None, 1.0
         else:
             cards = []
             has_session = False
@@ -993,7 +999,8 @@ def _board_live(date: str, board_lang: str = ""):
         section_children = [H2(ts.time_label)]
         if ev_banners:
             section_children.append(Div(*ev_banners, cls="board-events"))
-        section_children.append(body)
+        if body is not None:
+            section_children.append(body)
         sections.append(Section(*section_children,
                                 cls="board-section", style=f"flex:{weight}"))
 
@@ -1053,6 +1060,7 @@ def _board2_live(board_lang: str = ""):
                                   room_closures=closures,
                                   show_descriptions=True, show_background_images=True,
                                   merge_event_time=True,
+                                  hide_fully_closed_rows=True,
                                   open_label=t("비어있습니다. 열린공간 주제를 넣어주세요!",
                                                "Open — add an OpenSpace topic!"))
 

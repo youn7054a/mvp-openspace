@@ -89,7 +89,10 @@ def test_room_specific_slot_closure_blocks_conversation_but_keeps_event(admin_cl
         from app.models import ScheduleEntry
         assert db.exec(select(ScheduleEntry).where(ScheduleEntry.topic_id == event_id)).first()
 
-    assert "이벤트 진행 중" in client.get("/board2").text
+    board2 = client.get("/board2").text
+    assert "시간만 쓰는 이벤트" in board2
+    assert "이벤트 진행 중" not in board2
+    assert "시간만 쓰는 이벤트" in client.get("/board").text
     admin_client.post(f"/admin/timetable/room-slot/{room_id}/{ts_id}/open",
                       headers={"hx-request": "true"})
     with get_session() as db:
