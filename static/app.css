@@ -239,6 +239,7 @@ button:active, .btn:active { transform: translateY(1px); }
   animation: neon-flicker 4.5s infinite;
 }
 .hero-lede { font-size: .92rem; color: var(--ink-soft); margin: 0; }
+.hero-location { margin: 1rem 0 0; color: var(--accent); font-family: var(--font-mono); font-size: .82rem; }
 
 .new-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,22rem); gap: 2.5rem; align-items: start; }
 .form-col { min-width: 0; }
@@ -268,6 +269,11 @@ button:active, .btn:active { transform: translateY(1px); }
 .program-link { font-weight: 700; }
 .program-description { margin-top: 1rem; color: var(--foreground); line-height: 1.8; word-break: keep-all; }
 .program-note { margin-top: 1rem; padding-top: .8rem; border-top: 1px dashed var(--border); color: var(--accent); font-size: .84rem; line-height: 1.7; }
+
+/* 주제 목록의 열린공간 장소 안내 */
+.topics-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: .45rem 1rem; }
+.topics-heading h1 { margin: 0; }
+.topics-location { margin: 0; color: var(--accent); font-family: var(--font-mono); font-size: .82rem; }
 
 /* 미리보기 카드 (Preview card) — 네온 액자 */
 .pin-preview { position: sticky; top: 1.5rem; padding-top: .5rem; min-width: 0; }

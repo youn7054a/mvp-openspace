@@ -265,6 +265,8 @@ def _new_topic_view(identity, anchor_id: str = "new") -> list:
             "want to discuss — instead of a fixed program. You then place your topic "
             "into the timetable yourself, which opens two days before the event."),
           cls="hero-lede"),
+        P(t("원흥관 3층 i.SPACE에서 열립니다", "Held at i.SPACE, Wonheung Hall 3F"),
+          cls="hero-location"),
         id=anchor_id, cls="page-hero",
     )
     form = Form(
@@ -693,7 +695,12 @@ def register(app) -> None:
             notice(t("아직 제안된 주제가 없습니다.", "No topics yet."))]
         return layout(
             t("주제 목록", "Topic List"),
-            H1(t("주제 목록", "Topic List")),
+            Div(
+                H1(t("주제 목록", "Topic List")),
+                P(t("원흥관 3층 i.SPACE에서 열립니다", "Held at i.SPACE, Wonheung Hall 3F"),
+                  cls="topics-location"),
+                cls="topics-heading",
+            ),
             A(t("주제 등록", "Submit Topic"), href="/", cls="btn"),
             Section(*body, cls="topic-grid"),
         )
