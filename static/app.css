@@ -538,12 +538,12 @@ body.board {
   --accent-soft: transparent;
   --ink-soft: #333;
 
-  margin: 0; height: 100vh; overflow: hidden;     /* 스크롤 금지 (no scroll) */
+  margin: 0; height: 100vh; height: 100dvh; overflow: hidden;     /* 스크롤 금지 (no scroll) */
   color: var(--foreground); font-family: var(--font-body); font-weight: 700;
   background: var(--background);
 }
 body.board .content {
-  max-width: 100%; height: 100vh; padding: 2.2vh 2.4vw 2.6vh;
+  max-width: 100%; height: 100vh; height: 100dvh; padding: 2.2vh 2.4vw 2.6vh;
   display: flex; flex-direction: column; gap: 1vh;
 }
 
@@ -561,11 +561,11 @@ body.board2 {
   --accent-soft: #e8e8e8;
   --ink-soft: #333;
 
-  margin: 0; height: 100vh; overflow: hidden; color: var(--foreground);
+  margin: 0; height: 100vh; height: 100dvh; overflow: hidden; color: var(--foreground);
   font-family: var(--font-body); font-weight: 700; background: var(--background);
 }
 body.board2 .board2-content {
-  width: 100%; max-width: none; height: 100vh; margin: 0;
+  width: 100%; max-width: none; height: 100vh; height: 100dvh; min-width: 0; overflow: hidden; margin: 0;
   padding: clamp(.5rem, 1.5vh, 1.2rem) clamp(.5rem, 1.5vw, 1.5rem);
 }
 body.board2 #board2-live { height: 100%; display: flex; flex-direction: column; min-height: 0; }
@@ -646,16 +646,18 @@ body.board2 .slot-description {
 }
 
 /* QR 전용 열린공간 전광판 */
-body.board3 { margin: 0; min-height: 100vh; overflow: hidden; background: #fff; color: #111; }
+body.board3 { margin: 0; min-height: 100vh; min-height: 100dvh; overflow: hidden; background: #fff; color: #111; }
 body.board3 * { color: #111 !important; text-shadow: none !important; }
-body.board3 .board3-content { width: 100%; max-width: none; height: 100vh; box-sizing: border-box; padding: clamp(1.5rem, 4vh, 4rem) clamp(1.5rem, 6vw, 7rem); }
+body.board3 .board3-content { width: 100%; max-width: none; height: 100vh; height: 100dvh; box-sizing: border-box; overflow: hidden; padding: clamp(1.5rem, 4vh, 4rem) clamp(1.5rem, 6vw, 7rem); }
 body.board3 #board3-live { height: 100%; display: flex; flex-direction: column; align-items: center; text-align: center; }
 body.board3 h1 { margin: 0; font-size: clamp(2.2rem, 6vw, 6rem); color: #111; }
 body.board3 .board3-lead { margin: .5rem 0 1rem; font-size: clamp(1.1rem, 2.5vw, 2.5rem); font-weight: 700; }
-body.board3 .board3-qr-grid { flex: 1 1 auto; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; gap: clamp(2rem, 6vw, 7rem); }
+body.board3 .board3-qr-grid { flex: 1 1 auto; min-height: 0; width: 100%; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: clamp(1rem, 4vw, 5rem); overflow: hidden; }
 body.board3 .board3-qr-item { display: flex; flex-direction: column; align-items: center; gap: 1rem; }
-body.board3 .board3-qr-item h2 { margin: 0; font-size: clamp(1.4rem, 3.2vw, 3.4rem); }
-body.board3 .board3-qr-img { width: min(50vw, 58vh); height: min(50vw, 58vh); object-fit: contain; border: 2px solid #111; padding: 1rem; background: #fff; }
+body.board3 .board3-qr-item h2,
+body.board3 .board3-qr-label { margin: 0; font-size: clamp(1.4rem, 3.2vw, 3.4rem); font-weight: 700; }
+body.board3 .board3-qr-img { width: min(38vw, 52vh); height: min(38vw, 52vh); object-fit: contain; border: 2px solid #111; padding: 1rem; background: #fff; }
+body.board3 .board3-qr-item:only-child .board3-qr-img { width: min(54vw, 62vh); height: min(54vw, 62vh); }
 body.board2 td.slot-filled.has-image {
   position: relative; background-color: #fff; background-position: center; background-size: cover;
 }
@@ -675,6 +677,92 @@ body.board2 .board-qr-cap { font-size: clamp(.65rem, min(1.7vh, 1vw), 1.05rem); 
   body.board2 .board2-body { gap: .4rem; }
   body.board2 .board-qr { width: clamp(5.5rem, 10vw, 7.5rem); gap: .4rem; }
   body.board2 .board-qr-cap { display: none; }
+}
+
+/* 낮은 높이의 노트북·프로젝터: 세로 공간을 우선 확보해 하단이 잘리지 않게 한다. */
+@media (max-height: 780px) and (min-aspect-ratio: 1 / 1) {
+  body.board .content { padding: 1.2vh 1.5vw; gap: .55vh; }
+  .board-title { font-size: clamp(1.1rem, 3.3vh, 2rem); }
+  .board-section h2 { margin-bottom: .25vh; font-size: clamp(.65rem, 1.45vh, 1rem); }
+  .board-session { padding: .55vh .6vw; gap: .2vh; }
+  .board-session .title { -webkit-line-clamp: 3; font-size: clamp(.68rem, 1.45vh, 1rem); }
+  .board-closed .title { font-size: clamp(1rem, 2.4vh, 1.8rem); }
+  .board-qr { width: clamp(6.5rem, 12vw, 10rem); gap: .6vh; }
+  .board-qr-cap { font-size: clamp(.65rem, 1.4vh, .9rem); }
+
+  body.board2 .board2-content { padding: .45rem .55rem; }
+  body.board2 #board2-live > .board2-head { margin-bottom: .15vh; }
+  body.board2 #board2-live > .board2-head h1 { font-size: clamp(1.1rem, 3.4vh, 2.25rem); }
+  body.board2 .board2-location { font-size: clamp(.75rem, 1.9vh, 1.15rem); }
+  body.board2 .day-caption { margin: 0 0 .15rem; font-size: clamp(.8rem, 2vh, 1.25rem); }
+  body.board2 table.schedule th,
+  body.board2 table.schedule td { padding: .16rem .2rem; }
+  body.board2 .slot-title { font-size: clamp(.62rem, 1.75vh, 1rem); }
+  body.board2 .slot-description { margin-top: .1rem; font-size: clamp(.55rem, 1.35vh, .8rem); -webkit-line-clamp: 1; }
+
+  .light-board-content { padding: clamp(1rem, 3vh, 2rem) clamp(1rem, 4vw, 3rem); gap: .65rem; }
+  .light-board-content > h1 { font-size: clamp(1.5rem, 4.6vw, 3.5rem); }
+  .light-board-lead { font-size: clamp(.85rem, 2vw, 1.5rem); }
+  .light-board-card { border-width: 2px; padding: clamp(.8rem, 2vh, 1.4rem); }
+  .light-board-card h2 { font-size: clamp(1.2rem, 3vw, 2.4rem); }
+  .light-board-when, .light-board-description { font-size: clamp(.85rem, 2.1vw, 1.65rem); }
+  .light-board-qr-img { width: min(42vw, 48vh); height: min(42vw, 48vh); }
+}
+
+/* 세로형 디스플레이: 가로 폭보다 QR·테이블의 세로 여유를 우선한다. */
+@media (max-aspect-ratio: 1 / 1) {
+  body.board .content { padding: 1.4vh 1.5vw; }
+  .board-head { gap: .3rem; }
+  .board-title { font-size: clamp(1rem, 3.4vh, 2rem); }
+  .board-body { gap: .7vw; }
+  .board-qr { width: clamp(4.5rem, 16vw, 8rem); }
+  .board-qr-img { padding: .35vh; }
+  .board-qr-cap { display: none; }
+  .board-section h2 { font-size: clamp(.62rem, 1.45vh, .95rem); }
+  .board-session { padding: .5vh .45vw; }
+  .board-session .room { font-size: clamp(.55rem, 1.1vh, .75rem); }
+  .board-session .title { font-size: clamp(.6rem, 1.25vh, .85rem); -webkit-line-clamp: 3; }
+
+  body.board2 .board2-content { padding: .4rem; }
+  body.board2 .board2-location { font-size: clamp(.7rem, 1.8vh, 1rem); }
+  body.board2 .date-tabs { display: none; }
+  body.board2 table.schedule thead th { font-size: clamp(.6rem, 1.45vh, .95rem); }
+  body.board2 table.schedule tbody th { font-size: clamp(.62rem, 1.5vh, 1rem); }
+  body.board2 .slot-open, body.board2 td.slot-closed, body.board2 td.slot-event { font-size: clamp(.55rem, 1.35vh, .85rem); }
+  body.board2 .slot-title { font-size: clamp(.58rem, 1.45vh, .92rem); }
+  body.board2 .slot-description { display: none; }
+
+  body.board3 .board3-content { padding: clamp(1rem, 3vh, 2rem) clamp(.8rem, 3vw, 2rem); }
+  body.board3 h1 { font-size: clamp(1.6rem, 5vw, 3rem); }
+  body.board3 .board3-lead { font-size: clamp(.85rem, 2.6vw, 1.35rem); }
+  body.board3 .board3-qr-img,
+  body.board3 .board3-qr-item:only-child .board3-qr-img { width: min(72vw, 54vh); height: min(72vw, 54vh); }
+
+  .light-board-content { padding: clamp(1rem, 3vh, 2rem) clamp(.8rem, 3vw, 2rem); }
+  .light-board-content > h1 { font-size: clamp(1.7rem, 5vw, 3.2rem); }
+  .light-board-qr-img { width: min(76vw, 50vh); height: min(76vw, 50vh); }
+}
+
+/* QHD·4K 전광판: 기존 rem 상한 때문에 글자가 작아지지 않도록 함께 확대한다. */
+@media (min-width: 2200px) and (min-height: 1200px) {
+  body.board2 #board2-live > .board2-head h1 { font-size: clamp(3.1rem, 4.2vh, 5rem); }
+  body.board2 .board2-location { font-size: clamp(1.65rem, 2.55vh, 2.5rem); }
+  body.board2 .day-caption { font-size: clamp(1.9rem, 2.7vh, 2.8rem); }
+  body.board2 table.schedule thead th { font-size: clamp(1.55rem, 2.2vh, 2.4rem); }
+  body.board2 table.schedule tbody th { font-size: clamp(1.65rem, 2.3vh, 2.5rem); }
+  body.board2 .slot-title { font-size: clamp(1.7rem, 2.45vh, 2.6rem); }
+  body.board2 .slot-description { font-size: clamp(1.25rem, 1.9vh, 2rem); }
+
+  .board-title { font-size: clamp(2.5rem, 3.9vh, 4.5rem); }
+  .board-section h2 { font-size: clamp(1.25rem, 1.8vh, 2rem); }
+  .board-session .room { font-size: clamp(.9rem, 1.3vh, 1.45rem); }
+  .board-session .title { font-size: clamp(1.25rem, 1.75vh, 2rem); }
+  .board-qr-cap { font-size: clamp(1.25rem, 1.9vh, 1.8rem); }
+
+  body.board3 h1 { font-size: clamp(5rem, 6vw, 8rem); }
+  body.board3 .board3-lead { font-size: clamp(2rem, 2.5vw, 3.5rem); }
+  body.board3 .board3-qr-item h2,
+  body.board3 .board3-qr-label { font-size: clamp(2.8rem, 3.2vw, 4.8rem); }
 }
 
 /* 자동 전광판 (Auto board) — 등록된 URL을 전체화면 iframe으로 순환 표시 */
@@ -830,6 +918,14 @@ body.scroll-board .scroll-board-content { position: fixed; inset: 0; width: 100v
 .light-board-qr { display: flex; flex-direction: column; align-items: center; gap: .6rem; }
 .light-board-qr-img { width: clamp(16rem, 50vw, 50rem); height: clamp(16rem, 50vw, 50rem); max-height: 60vh; object-fit: contain; background: #fff; border: 2px solid #222; padding: .6rem; }
 .light-board-qr-caption { margin: 0; max-width: 28rem; font-size: clamp(1.1rem, 2.1vw, 2rem); font-weight: 700; color: #111; }
+/* 라이트닝토크 전광판은 제목과 신청 QR만 노출한다. */
+.light-board-content .light-board-title { text-align: center; }
+.light-board-qr-only {
+  flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center;
+}
+.light-board-qr-only .light-board-qr-img {
+  width: min(50vw, 70vh); height: min(50vw, 70vh); max-height: none;
+}
 
 /* ---------- 반응형 (Responsive) ---------- */
 @media (max-width: 52rem) {

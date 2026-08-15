@@ -1235,25 +1235,24 @@ def _board2_live(board_lang: str = ""):
 
 
 def _board3_live(board_lang: str = ""):
-    """열린공간 공통 QR만 표시하는 전광판 본문."""
+    """열린공간 등록·목록 QR만 표시하는 전용 전광판."""
     with get_session() as session:
         qrs = board_qrs(session)
     items = []
-    for slot, qr in sorted(qrs.items()):
-        if not qr.image_url:
+    # QR 1은 등록, QR 2는 목록으로 고정한다. 관리자가 입력한 캡션·추가 QR은
+    # 이 전광판에 노출하지 않아 현장에서 QR의 목적을 즉시 파악할 수 있게 한다.
+    for slot, label in ((1, t("등록", "Submit")), (2, t("목록", "List"))):
+        qr = qrs.get(slot)
+        if not qr or not qr.image_url:
             continue
-        caption = qr.caption_en if get_lang() == "en" and qr.caption_en else qr.caption
         items.append(Section(
-            H2(caption or t("열린공간 신청", "OpenSpace Application")),
-            Img(src=qr.image_url, alt=caption or f"QR {slot}", cls="board3-qr-img"),
+            P(label, cls="board3-qr-label"),
+            Img(src=qr.image_url, alt=f"{label} QR", cls="board3-qr-img"),
             cls="board3-qr-item",
         ))
     return Div(
-        H1(t("열린공간 신청", "OpenSpace Application")),
-        P(t("QR 코드를 스캔해 열린공간 주제를 등록해 주세요.",
-            "Scan the QR code to submit an OpenSpace topic."), cls="board3-lead"),
-        Div(*items, cls="board3-qr-grid") if items else notice(
-            t("등록된 QR 코드가 없습니다.", "No QR code has been registered.")),
+        H1(t("열린공간", "OpenSpace")),
+        Div(*items, cls="board3-qr-grid"),
         id="board3-live",
         hx_get=f"/board3/live?board_lang={board_lang}",
         hx_trigger="every 45s",

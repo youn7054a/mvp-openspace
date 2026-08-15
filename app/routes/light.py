@@ -521,19 +521,17 @@ def register(app) -> None:
             set_lang(board_lang)
         note_identity(identity_from_session(session))
         with get_session() as db:
-            # 전광판은 현장 신청 QR만 노출한다. 날짜별 운영 정보는 신청 화면에서만 사용.
             qrs = lightning_qrs(db)[:1]
             language_interval = board_language_interval(db)
-        card = (Section(
-            Div(P(t("라이트닝토크 신청", "Lightning Talk Application"),
-                  cls="light-board-qr-title"),
-                *[Div(Img(src=qr.image_url, alt="QR", cls="light-board-qr-img"),
-                      cls="light-board-qr") for qr in qrs],
-                cls="light-board-qrs"),
-            cls="light-board-card",
-        ) if qrs else notice(t("현재 신청 QR 코드가 없습니다.", "No application QR code is available.")))
+        # 전광판은 신청 QR만 빠르게 인지하는 용도다. 날짜·시간·장소·안내문·QR 캡션 등
+        # 관리자 입력 내용은 노출하지 않는다.
+        qr_content = Div(
+            *[Img(src=qr.image_url, alt=t("라이트닝 토크 신청 QR 코드", "Lightning Talk application QR code"),
+                  cls="light-board-qr-img") for qr in qrs if qr.image_url],
+            cls="light-board-qr-only",
+        )
         return layout(t("라이트닝 토크", "Lightning Talk"),
-                      H1(t("파이콘 한국 라이트닝 토크", "PyCon Korea Lightning Talk")),
-                      card,
+                      H1(t("라이트닝 토크", "Lightning Talk"), cls="light-board-title"),
+                      qr_content,
                       board_language_auto_switch(language_interval),
                       chrome=False, main_cls="light-board-content", body_cls="light-board")
