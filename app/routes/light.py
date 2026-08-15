@@ -18,7 +18,7 @@ from ..database import get_session
 from ..i18n import get_lang, set_lang, t
 from ..models import LightningApplication, LightningQR, LightningSession, LightningSetting, LightningStatus, utcnow
 from ..queries import (board_language_interval, lightning_application_notice,
-                       lightning_qrs, lightning_sessions)
+                       lightning_application_notice_en, lightning_qrs, lightning_sessions)
 from ..uploads import UploadError, delete_local_image, normalize_image_url, save_image
 
 
@@ -81,9 +81,16 @@ Presentation material is not required when applying, but is required for present
 Venue and time: Room 4142, 4F New Engineering Building, 17:20–18:00."""
 
 
-def _application_notice(value: str = "") -> str:
-    return (value or "").strip() or t(_DEFAULT_APPLICATION_NOTICE_KO,
-                                        _DEFAULT_APPLICATION_NOTICE_EN)
+def _application_notice(value: str = "", value_en: str = "") -> str:
+    """저장된 공지의 요청 언어 버전. 기본 한국어 문구는 영문을 자동 제공한다."""
+    ko, en = (value or "").strip(), (value_en or "").strip()
+    if get_lang() == "en":
+        if en:
+            return en
+        # 기존에 기본 한국어 공지만 저장한 환경도 영어 전환 시 자연스럽게 번역한다.
+        if not ko or " ".join(ko.split()) == " ".join(_DEFAULT_APPLICATION_NOTICE_KO.split()):
+            return _DEFAULT_APPLICATION_NOTICE_EN
+    return ko or t(_DEFAULT_APPLICATION_NOTICE_KO, _DEFAULT_APPLICATION_NOTICE_EN)
 
 
 def _application_for(db, session_id: int, identity):
@@ -101,6 +108,7 @@ def _application_for(db, session_id: int, identity):
 def _status_label(status):
     return {
         LightningStatus.PENDING: t("검토 대기", "Pending"),
+        LightningStatus.WAITLIST: t("대기자", "Waitlist"),
         LightningStatus.ACCEPTED: t("합격", "Accepted"),
         LightningStatus.REJECTED: t("불합격", "Not accepted"),
     }[status]
@@ -119,8 +127,9 @@ def _light_form(light_session, application=None, default_name: str = ""):
         status = P(f"{t('상태', 'Status')}: {_status_label(application.status)}",
                    cls="light-status")
     else:
-        heading = t("라이트닝토크 신청", "Apply for Lightning Talk")
-        button = t("신청하기", "Apply")
+        is_waitlist = not light_session.is_open
+        heading = t("대기자 신청", "Join the waitlist") if is_waitlist else t("라이트닝토크 신청", "Apply for Lightning Talk")
+        button = t("대기자로 신청하기", "Join waitlist") if is_waitlist else t("신청하기", "Apply")
         action = f"/light/{light_session.id}/apply"
         title = description = material = ""
         speaker_name = default_name
@@ -130,33 +139,70 @@ def _light_form(light_session, application=None, default_name: str = ""):
         P(" · ".join(x for x in [_time_label(light_session.starts_at), _venue_label(light_session)] if x),
           cls="light-when"),
         P(light_session.description, cls="field-help") if light_session.description else None,
+        Div(
+            P(t("신청 마감", "APPLICATIONS CLOSED"), cls="light-closed-title"),
+            P(t("현재 신청은 마감되었습니다. 지금 신청하면 대기자로 등록되며, 최종 참여 여부는 운영 상황에 따라 안내됩니다.",
+                "Applications are closed. New submissions join the waitlist; final participation is announced by the organizers.")),
+            cls="light-closed-notice",
+        ) if not light_session.is_open and not application else None,
         status,
+        Div(
+            Form(
+                field(t("이름 또는 별명", "Name or nickname"), "speaker_name", value=speaker_name,
+                      placeholder=t("운영진이 확인할 이름 또는 별명을 입력해 주세요.",
+                                    "Enter the name or nickname the event team should use.")),
+                field(t("발표 제목", "Talk title"), "title", value=title,
+                      placeholder=t("예: 내가 파이썬 커뮤니티에서 배운 것", "e.g. What I learned in the Python community")),
+                field(t("간단한 소개", "Short description"), "description", value=description,
+                      textarea=True, required=False,
+                      placeholder=t("발표 내용을 한두 문장으로 소개해 주세요.", "Describe your talk in one or two sentences.")),
+                field(t("발표 자료 URL", "Presentation URL"), "presentation_url", value=material,
+                      required=False, placeholder="https://docs.google.com/presentation/..."),
+                P(t("Google Slides 공유 링크 또는 누구나 열 수 있는 PDF 링크를 입력해 주세요. "
+                    "현장에서 운영진이 바로 엽니다.",
+                    "Use a shared Google Slides link or a publicly accessible PDF URL. "
+                    "The event team opens it on site."), cls="field-help"),
+                Button(button, type="submit"), method="post", action=action,
+            ),
+            cls="light-application",
+        ),
         Form(
-            field(t("이름 또는 별명", "Name or nickname"), "speaker_name", value=speaker_name,
-                  placeholder=t("운영진이 확인할 이름 또는 별명을 입력해 주세요.",
-                                "Enter the name or nickname the event team should use.")),
-            field(t("발표 제목", "Talk title"), "title", value=title,
-                  placeholder=t("예: 내가 파이썬 커뮤니티에서 배운 것", "e.g. What I learned in the Python community")),
-            field(t("간단한 소개", "Short description"), "description", value=description,
-                  textarea=True, required=False,
-                  placeholder=t("발표 내용을 한두 문장으로 소개해 주세요.", "Describe your talk in one or two sentences.")),
-            field(t("발표 자료 URL", "Presentation URL"), "presentation_url", value=material,
-                  required=False, placeholder="https://docs.google.com/presentation/..."),
-            P(t("Google Slides 공유 링크 또는 누구나 열 수 있는 PDF 링크를 입력해 주세요. "
-                "현장에서 운영진이 바로 엽니다.",
-                "Use a shared Google Slides link or a publicly accessible PDF URL. "
-                "The event team opens it on site."), cls="field-help"),
-            Button(button, type="submit"), method="post", action=action,
-        ), cls="light-application",
+            Button(t("신청 내역 삭제", "Delete application"), type="submit", cls="danger"),
+            method="post", action=f"/light/{light_session.id}/delete",
+            onsubmit=f"return confirm('{t('내 라이트닝토크 신청 내역을 삭제할까요?', 'Delete your Lightning Talk application?')}')",
+        ) if application else None,
     )
 
 
 def _next_order(db, session_id: int) -> int:
-    accepted = list(db.exec(select(LightningApplication).where(
+    applications = list(db.exec(select(LightningApplication).where(
         LightningApplication.session_id == session_id,
-        LightningApplication.status == LightningStatus.ACCEPTED,
     )))
-    return max((app.presentation_order or 0 for app in accepted), default=0) + 1
+    return max((app.presentation_order or 0 for app in applications), default=0) + 1
+
+
+def _application_sort_key(application):
+    """신청 목록: 발표 순서대로, 불합격자는 항상 마지막."""
+    return (
+        application.status == LightningStatus.REJECTED,
+        application.presentation_order or application.id or 0,
+        application.created_at,
+    )
+
+
+def _move_presentation_order(db, application, requested_order: int) -> None:
+    """불합격자를 제외한 신청 목록에서 발표 순서를 원하는 번호로 옮긴다."""
+    applications = list(db.exec(select(LightningApplication).where(
+        LightningApplication.session_id == application.session_id,
+    )))
+    active = sorted((item for item in applications
+                     if item.status != LightningStatus.REJECTED and item.id != application.id),
+                    key=_application_sort_key)
+    position = max(1, min(requested_order, len(active) + 1))
+    active.insert(position - 1, application)
+    for order, item in enumerate(active, start=1):
+        item.presentation_order, item.updated_at = order, utcnow()
+        db.add(item)
 
 
 def _accepted_on_other_date(db, application, target_session) -> LightningSession | None:
@@ -179,7 +225,7 @@ def _accepted_on_other_date(db, application, target_session) -> LightningSession
 def _admin_application_rows(applications, session_id: int):
     """날짜 하나의 관리자 신청 목록 행과 운영 컨트롤."""
     rows = []
-    for application in applications:
+    for number, application in enumerate(applications, start=1):
         material = (A(t("자료 열기 ↗", "Open material ↗"), href=application.presentation_url,
                       target="_blank", rel="noreferrer") if application.presentation_url
                     else t("미등록", "Not provided"))
@@ -188,15 +234,20 @@ def _admin_application_rows(applications, session_id: int):
                  action=f"/admin/light/applications/{application.id}/accept?session_id={session_id}", style="display:inline"), " ",
             Form(Button(t("불합격", "Reject"), type="submit", cls="secondary"), method="post",
                  action=f"/admin/light/applications/{application.id}/reject?session_id={session_id}", style="display:inline"),
+            " ",
+            Form(Button(t("삭제", "Delete"), type="submit", cls="danger"), method="post",
+                 action=f"/admin/light/applications/{application.id}/delete?session_id={session_id}",
+                 onsubmit=f"return confirm('{t('이 신청 내역을 삭제할까요?', 'Delete this application?')}')",
+                 style="display:inline"),
         )
-        order = (Form(Input(type="number", name="presentation_order",
-                            value=str(application.presentation_order or ""), min="1"),
-                      Button(t("순서 저장", "Save order"), type="submit", cls="secondary"),
+        order = (Form(Input(type="number", name="presentation_order", value=str(number), min="1"),
+                      Button(t("발표 순서 저장", "Save presentation order"), type="submit", cls="secondary"),
                       method="post", action=f"/admin/light/applications/{application.id}/order?session_id={session_id}")
-                 if application.status == LightningStatus.ACCEPTED else "—")
-        rows.append(Tr(Td(application.applicant_name), Td(application.applicant_email),
+                 if application.status != LightningStatus.REJECTED else "—")
+        rows.append(Tr(Td(str(number)), Td(application.applicant_name), Td(application.applicant_email),
                        Td(application.title), Td(_status_label(application.status)),
-                       Td(order), Td(material), Td(actions)))
+                       Td(order), Td(material), Td(actions),
+                       cls="light-application-rejected" if application.status == LightningStatus.REJECTED else ""))
     return rows
 
 
@@ -244,11 +295,12 @@ def register(app) -> None:
         if not identity:
             return login_required_page()
         with get_session() as db:
-            # 라이트닝토크는 현장 당일 접수만 허용한다.
+            # 라이트닝토크는 현장 당일에만 보인다. 마감 후에도 대기자 신청을 받는다.
             sessions = [item for item in lightning_sessions(db)
-                        if item.is_open and item.session_date == _today()]
+                        if item.session_date == _today()]
             applications = {item.id: _application_for(db, item.id, identity) for item in sessions}
             application_notice = lightning_application_notice(db)
+            application_notice_en = lightning_application_notice_en(db)
         default_name = identity.username or identity.email.split("@")[0]
         body = [_light_form(item, applications[item.id], default_name) for item in sessions]
         if not body:
@@ -256,7 +308,7 @@ def register(app) -> None:
                              "Lightning Talk applications are available only on the event day."))]
         return layout(t("라이트닝토크", "Lightning Talk"),
                       H1(t("라이트닝토크 신청", "Lightning Talk Application")),
-                      P(_application_notice(application_notice), cls="light-application-notice"),
+                      P(_application_notice(application_notice, application_notice_en), cls="light-application-notice"),
                       *body, active="/light")
 
     @app.post("/light/{light_session_id}/apply")
@@ -274,7 +326,7 @@ def register(app) -> None:
                           A(t("돌아가기", "Back"), href="/light", cls="btn secondary"))
         with get_session() as db:
             item = db.get(LightningSession, light_session_id)
-            if not item or not item.is_open or item.session_date != _today():
+            if not item or item.session_date != _today():
                 return RedirectResponse("/light", status_code=303)
             if _application_for(db, item.id, identity):
                 return RedirectResponse("/light", status_code=303)
@@ -283,6 +335,8 @@ def register(app) -> None:
                 applicant_name=speaker_name,
                 applicant_email=identity.email, applicant_username=identity.username,
                 title=title, description=(description or "").strip(), presentation_url=material,
+                status=(LightningStatus.PENDING if item.is_open else LightningStatus.WAITLIST),
+                presentation_order=_next_order(db, item.id),
             ))
             try:
                 db.commit()
@@ -310,6 +364,19 @@ def register(app) -> None:
                 db.commit()
         return RedirectResponse("/light", status_code=303)
 
+    @app.post("/light/{light_session_id}/delete")
+    def light_delete(request, session, light_session_id: int):
+        """참가자는 본인이 등록한 라이트닝토크 신청 내역만 삭제할 수 있다."""
+        identity = resolve_identity(request, session)
+        if not identity:
+            return login_required_page()
+        with get_session() as db:
+            application = _application_for(db, light_session_id, identity)
+            if application:
+                db.delete(application)
+                db.commit()
+        return RedirectResponse("/light", status_code=303)
+
     @app.get("/admin/light")
     def admin_light(session):
         if (redir := _require_admin(session)):
@@ -318,10 +385,11 @@ def register(app) -> None:
             sessions = lightning_sessions(db)
             common_qrs = lightning_qrs(db)[:1]
             application_notice = lightning_application_notice(db)
+            application_notice_en = lightning_application_notice_en(db)
         parts = []
         for item in sessions:
             parts.append(Section(
-                H2(f"{item.session_date:%Y.%m.%d} · {t('신청 열림', 'Open') if item.is_open else t('신청 닫힘', 'Closed')}"),
+                H2(f"{item.session_date:%Y.%m.%d} · {t('신청 열림', 'Open') if item.is_open else t('신청 마감 · 대기자 접수', 'Closed · Waitlist open')}"),
                 Form(field(t("전광판 제목", "Board title"), "board_title", value=item.board_title,
                            required=False,
                            placeholder=t("예: 파이콘 한국 라이트닝 토크", "e.g. PyCon Korea Lightning Talk")),
@@ -334,8 +402,11 @@ def register(app) -> None:
                            textarea=True, required=False),
                      Button(t("설정 저장", "Save settings"), type="submit"), method="post",
                      action=f"/admin/light/{item.id}/update"),
-                Form(Button(t("신청 닫기", "Close applications") if item.is_open else t("신청 열기", "Open applications"),
+                Form(Button(t("신청 마감", "Close applications") if item.is_open else t("신청 재개", "Reopen applications"),
                             type="submit", cls="secondary"), method="post", action=f"/admin/light/{item.id}/toggle"),
+                P(t("현재 신청 마감 상태입니다. 새 신청은 대기자로 등록됩니다.",
+                    "Applications are currently closed. New submissions join the waitlist."),
+                  cls="light-admin-closed") if not item.is_open else None,
                 P(A(t("이 날짜의 신청 목록 보기", "View applications for this date"),
                     href=f"/admin/light/applications?session_id={item.id}", cls="btn secondary")),
                 cls="light-admin-session"))
@@ -343,13 +414,26 @@ def register(app) -> None:
                              H2(t("라이트닝토크 날짜 추가", "Add Lightning Talk Date")),
                              Form(field(t("날짜", "Date"), "session_date", input_type="date"),
                                   Button(t("날짜 추가", "Add date"), type="submit"), method="post", action="/admin/light"),
+                             Section(
+                                 H2(t("라이트닝토크 데모 데이터", "Lightning Talk demo data")),
+                                 P(t("15·16일 세션과 합격·검토 대기·대기자·불합격 신청 예시를 만듭니다. "
+                                     "기존 라이트닝 세션과 신청 목록은 교체됩니다.",
+                                     "Creates 15th/16th sessions with accepted, pending, waitlisted, and rejected examples. "
+                                     "Existing Lightning Talk sessions and applications are replaced."), cls="field-help"),
+                                 Form(Button(t("데모 데이터 채우기", "Seed demo data"), type="submit", cls="secondary"),
+                                      method="post", action="/admin/light/seed",
+                                      onsubmit=f"return confirm('{t('기존 라이트닝토크 세션과 신청 목록을 교체합니다. 계속할까요?', 'This replaces existing Lightning Talk sessions and applications. Continue?')}')"),
+                             ),
                              P(A(t("라이트닝 전광판 열기", "Open Lightning Board"), href="/light/board", target="_blank", cls="btn secondary")),
                              Section(
                                  H2(t("공통 신청 공지", "Shared application notice")),
                                  P(t("15일·16일 신청 화면에 같은 공지가 표시됩니다.",
                                      "The same notice appears on both application dates."), cls="field-help"),
                                  Form(field(t("공지", "Notice"), "application_notice",
-                                            value=_application_notice(application_notice), textarea=True,
+                                            value=application_notice or _DEFAULT_APPLICATION_NOTICE_KO, textarea=True,
+                                            required=False),
+                                      field(t("영문 공지", "Notice in English"), "application_notice_en",
+                                            value=application_notice_en or _DEFAULT_APPLICATION_NOTICE_EN, textarea=True,
                                             required=False),
                                       Button(t("공지 저장", "Save notice"), type="submit"), method="post",
                                       action="/admin/light/notice"),
@@ -375,6 +459,53 @@ def register(app) -> None:
                              ),
                              *parts)
 
+    @app.post("/admin/light/seed")
+    def admin_light_seed(session):
+        """라이트닝 운영 화면을 빠르게 확인할 수 있는 예시 세션·신청 목록을 채운다."""
+        if (redir := _require_admin(session)):
+            return redir
+        with get_session() as db:
+            # 신청 → 날짜별 QR → 세션 순으로 지워 FK 제약을 지킨다. 공통 전광판 QR은 보존.
+            for application in db.exec(select(LightningApplication)):
+                db.delete(application)
+            for qr in db.exec(select(LightningQR).where(LightningQR.session_id != None)):  # noqa: E711
+                db.delete(qr)
+            for item in db.exec(select(LightningSession)):
+                db.delete(item)
+            db.commit()
+
+            first = LightningSession(
+                session_date=date(2026, 8, 15), starts_at="17:20",
+                venue="신공학관 4층 4142호", venue_en="Room 4142, 4F New Engineering Building",
+                description="정규 세션 종료 후 진행됩니다.", is_open=True,
+            )
+            second = LightningSession(
+                session_date=date(2026, 8, 16), starts_at="17:20",
+                venue="신공학관 4층 4142호", venue_en="Room 4142, 4F New Engineering Building",
+                description="정규 세션 종료 후 진행됩니다.", is_open=False,
+            )
+            db.add(first); db.add(second); db.commit(); db.refresh(first); db.refresh(second)
+            db.add_all([
+                LightningApplication(session_id=first.id, applicant_email="minji@example.com",
+                    applicant_name="민지", title="파이썬으로 시작한 작은 자동화", description="반복 업무를 줄인 경험입니다.",
+                    presentation_url="https://docs.google.com/presentation/d/example", status=LightningStatus.ACCEPTED,
+                    presentation_order=1),
+                LightningApplication(session_id=first.id, applicant_email="junho@example.com",
+                    applicant_name="준호", title="커뮤니티에서 만난 첫 오픈소스", description="함께 기여하며 배운 이야기입니다.",
+                    status=LightningStatus.PENDING, presentation_order=2),
+                LightningApplication(session_id=first.id, applicant_email="seoyeon@example.com",
+                    applicant_name="서연", title="파이썬으로 만든 나만의 도구", description="작지만 유용한 도구 소개입니다.",
+                    status=LightningStatus.WAITLIST, presentation_order=3),
+                LightningApplication(session_id=first.id, applicant_email="dohyun@example.com",
+                    applicant_name="도현", title="파이썬 첫 발표 도전기", status=LightningStatus.REJECTED,
+                    presentation_order=99),
+                LightningApplication(session_id=second.id, applicant_email="yuna@example.com",
+                    applicant_name="유나", title="파이썬과 함께한 취미 프로젝트", status=LightningStatus.WAITLIST,
+                    presentation_order=1),
+            ])
+            db.commit()
+        return RedirectResponse("/admin/light", status_code=303)
+
     @app.get("/admin/light/applications")
     def admin_light_applications(session, session_id: int = 0):
         """날짜 선택형 라이트닝토크 신청 목록·합격·순서 운영 화면."""
@@ -384,9 +515,8 @@ def register(app) -> None:
             sessions = lightning_sessions(db)
             selected = next((item for item in sessions if item.id == session_id),
                             sessions[0] if sessions else None)
-            applications = (list(db.exec(select(LightningApplication).where(
-                LightningApplication.session_id == selected.id).order_by(
-                LightningApplication.presentation_order, LightningApplication.created_at)))
+            applications = (sorted(list(db.exec(select(LightningApplication).where(
+                LightningApplication.session_id == selected.id))), key=_application_sort_key)
                             if selected else [])
         date_links = Div(*[
             A(f"{item.session_date:%m월 %d일}",
@@ -394,9 +524,9 @@ def register(app) -> None:
               cls="btn" if selected and item.id == selected.id else "btn secondary")
             for item in sessions
         ], cls="light-date-tabs")
-        table = (Table(Thead(Tr(Th(t("신청자", "Applicant")), Th(t("이메일", "Email")),
+        table = (Table(Thead(Tr(Th(t("번호", "No.")), Th(t("신청자", "Applicant")), Th(t("이메일", "Email")),
                                 Th(t("발표 제목", "Title")), Th(t("상태", "Status")),
-                                Th(t("순서", "Order")), Th(t("발표 자료", "Material")),
+                                Th(t("발표 순서", "Presentation order")), Th(t("발표 자료", "Material")),
                                 Th(t("작업", "Actions")))),
                        *_admin_application_rows(applications, selected.id), cls="schedule")
                  if applications else P(t("이 날짜에는 신청이 없습니다.", "No applications for this date.")))
@@ -438,12 +568,13 @@ def register(app) -> None:
         return RedirectResponse("/admin/light", status_code=303)
 
     @app.post("/admin/light/notice")
-    def admin_light_notice(session, application_notice: str = ""):
+    def admin_light_notice(session, application_notice: str = "", application_notice_en: str = ""):
         if (redir := _require_admin(session)):
             return redir
         with get_session() as db:
             setting = db.get(LightningSetting, 1) or LightningSetting(id=1)
             setting.application_notice = (application_notice or "").strip()
+            setting.application_notice_en = (application_notice_en or "").strip()
             setting.updated_at = utcnow()
             db.add(setting)
             db.commit()
@@ -488,8 +619,21 @@ def register(app) -> None:
         with get_session() as db:
             application = db.get(LightningApplication, application_id)
             if application:
-                application.status, application.presentation_order = LightningStatus.REJECTED, None
+                application.status = LightningStatus.REJECTED
+                # 불합격자는 발표 순서상 맨 아래로 이동한다.
+                application.presentation_order = _next_order(db, application.session_id)
                 application.updated_at = utcnow(); db.add(application); db.commit()
+        return RedirectResponse(f"/admin/light/applications?session_id={session_id}", status_code=303)
+
+    @app.post("/admin/light/applications/{application_id}/delete")
+    def admin_light_application_delete(session, application_id: int, session_id: int = 0):
+        if (redir := _require_admin(session)):
+            return redir
+        with get_session() as db:
+            application = db.get(LightningApplication, application_id)
+            if application:
+                db.delete(application)
+                db.commit()
         return RedirectResponse(f"/admin/light/applications?session_id={session_id}", status_code=303)
 
     @app.post("/admin/light/applications/{application_id}/order")
@@ -499,9 +643,9 @@ def register(app) -> None:
             return redir
         with get_session() as db:
             application = db.get(LightningApplication, application_id)
-            if application and application.status == LightningStatus.ACCEPTED and presentation_order > 0:
-                application.presentation_order, application.updated_at = presentation_order, utcnow()
-                db.add(application); db.commit()
+            if application and application.status != LightningStatus.REJECTED and presentation_order > 0:
+                _move_presentation_order(db, application, presentation_order)
+                db.commit()
         return RedirectResponse(f"/admin/light/applications?session_id={session_id}", status_code=303)
 
     @app.post("/admin/light/{light_session_id}/qr")

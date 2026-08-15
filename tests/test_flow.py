@@ -5,7 +5,7 @@ from sqlmodel import select
 
 from app.database import get_session
 from app.models import (
-    BoardQR, LightningApplication, LightningQR, LightningStatus, Room, RoomSlotClosure,
+    BoardQR, LightningApplication, LightningQR, LightningSession, LightningStatus, Room, RoomSlotClosure,
     ScheduleEntry, Timeslot, Topic, TopicKind,
 )
 
@@ -225,6 +225,114 @@ def test_light_operator_password_grants_lightning_admin_only(client):
     assert client.get("/admin/light").status_code == 200
     client.post("/light/admin/logout")
     assert client.get("/admin/light", follow_redirects=False).status_code == 303
+
+
+def test_closed_lightning_session_registers_new_applicants_on_waitlist(client, admin_client,
+                                                                         monkeypatch):
+    from datetime import date
+    from app.routes import light
+
+    monkeypatch.setattr(light, "_today", lambda: date(2026, 8, 15))
+    session_id = _add_light_session(admin_client, "2026-08-15")
+    admin_client.post(f"/admin/light/{session_id}/toggle")
+    login(client, "waitlist@example.com")
+    page = client.get("/light").text
+    assert "신청 마감" in page and "대기자로 등록" in page and "대기자로 신청하기" in page
+    client.post(f"/light/{session_id}/apply", data={
+        "speaker_name": "대기자", "title": "대기 발표",
+    })
+    with get_session() as db:
+        application = db.exec(select(LightningApplication).where(
+            LightningApplication.session_id == session_id)).first()
+    assert application.status == LightningStatus.WAITLIST
+
+
+def test_lightning_application_notice_switches_to_english(client, admin_client, monkeypatch):
+    from datetime import date
+    from app.routes import light
+
+    monkeypatch.setattr(light, "_today", lambda: date(2026, 8, 15))
+    _add_light_session(admin_client, "2026-08-15")
+    admin_client.post("/admin/light/notice", data={
+        "application_notice": light._DEFAULT_APPLICATION_NOTICE_KO,
+        "application_notice_en": light._DEFAULT_APPLICATION_NOTICE_EN,
+    })
+    login(client, "notice@example.com")
+    client.get("/lang/en?next=/light")
+    page = client.get("/light").text
+    assert "Lightning Talk applications are available on the day only" in page
+
+
+def test_admin_can_delete_lightning_application(admin_client):
+    session_id = _add_light_session(admin_client, "2026-08-15")
+    with get_session() as db:
+        application = LightningApplication(session_id=session_id, applicant_email="delete@example.com",
+                                            applicant_name="삭제 대상", title="삭제할 발표")
+        db.add(application); db.commit(); db.refresh(application)
+        application_id = application.id
+    response = admin_client.post(
+        f"/admin/light/applications/{application_id}/delete?session_id={session_id}",
+        follow_redirects=True,
+    )
+    assert "삭제 대상" not in response.text
+    with get_session() as db:
+        assert db.get(LightningApplication, application_id) is None
+
+
+def test_participant_can_delete_own_lightning_application(client, admin_client, monkeypatch):
+    from datetime import date
+    from app.routes import light
+
+    monkeypatch.setattr(light, "_today", lambda: date(2026, 8, 15))
+    session_id = _add_light_session(admin_client, "2026-08-15")
+    login(client, "own-application@example.com")
+    client.post(f"/light/{session_id}/apply", data={"speaker_name": "신청자", "title": "내 발표"})
+    page = client.get("/light").text
+    assert f'action="/light/{session_id}/delete"' in page
+    assert "내 라이트닝토크 신청 내역을 삭제할까요?" in page
+    client.post(f"/light/{session_id}/delete")
+    with get_session() as db:
+        application = db.exec(select(LightningApplication).where(
+            LightningApplication.session_id == session_id)).first()
+    assert application is None
+
+
+def test_lightning_application_list_can_reorder_and_reject_moves_to_end(admin_client):
+    session_id = _add_light_session(admin_client, "2026-08-15")
+    with get_session() as db:
+        first = LightningApplication(session_id=session_id, applicant_email="one@example.com",
+                                     applicant_name="첫째", title="첫 발표", presentation_order=1)
+        second = LightningApplication(session_id=session_id, applicant_email="two@example.com",
+                                      applicant_name="둘째", title="둘 발표", presentation_order=2)
+        db.add(first); db.add(second); db.commit(); db.refresh(first); db.refresh(second)
+        first_id, second_id = first.id, second.id
+    admin_client.post(f"/admin/light/applications/{second_id}/order?session_id={session_id}",
+                      data={"presentation_order": "1"})
+    with get_session() as db:
+        first, second = db.get(LightningApplication, first_id), db.get(LightningApplication, second_id)
+        assert second.presentation_order == 1 and first.presentation_order == 2
+    admin_client.post(f"/admin/light/applications/{second_id}/reject?session_id={session_id}")
+    with get_session() as db:
+        first, second = db.get(LightningApplication, first_id), db.get(LightningApplication, second_id)
+        assert second.status == LightningStatus.REJECTED
+        assert second.presentation_order > first.presentation_order
+    page = admin_client.get(f"/admin/light/applications?session_id={session_id}").text
+    assert page.index("첫째") < page.index("둘째")
+    assert "light-application-rejected" in page
+
+
+def test_admin_can_seed_lightning_demo_data(admin_client):
+    response = admin_client.post("/admin/light/seed", follow_redirects=True)
+    assert response.status_code == 200
+    assert "라이트닝토크 데모 데이터" in response.text
+    with get_session() as db:
+        sessions = list(db.exec(select(LightningSession).order_by(LightningSession.session_date)))
+        applications = list(db.exec(select(LightningApplication)))
+    assert [item.session_date.isoformat() for item in sessions] == ["2026-08-15", "2026-08-16"]
+    assert {item.status for item in applications} >= {
+        LightningStatus.ACCEPTED, LightningStatus.PENDING,
+        LightningStatus.WAITLIST, LightningStatus.REJECTED,
+    }
 
 
 def test_optional_nickname_and_image_url(client):
@@ -538,6 +646,34 @@ def test_topic_list_sorts_scheduled_cards_by_date_time_and_table(client, admin_c
     assert page.index("먼저 진행되는 주제") < page.index("나중에 진행되는 주제")
     assert page.index("나중에 진행되는 주제") < page.index("아직 미배정 주제")
     assert "2026.08.15 · 13:30–14:10 · 1번 테이블" in page
+
+
+def test_topic_list_places_past_scheduled_topics_below_unscheduled(client, admin_client,
+                                                                     monkeypatch):
+    from datetime import date
+    from app.routes import public
+
+    monkeypatch.setattr(public, "_openspace_today", lambda: date(2026, 8, 15))
+    admin_client.post("/admin/rooms", data={"name": "1번 테이블", "sort_order": "0"})
+    for day in ("2026-08-14", "2026-08-15", "2026-08-16"):
+        admin_client.post("/admin/timeslots", data={
+            "date": day, "start_time": "13:30", "slot_minutes": "40",
+            "break_minutes": "0", "count": "1"})
+    past_id = _submit_topic(client, title="지난 주제", email="past@example.com")
+    today_id = _submit_topic(client, title="오늘 주제", email="today@example.com")
+    future_id = _submit_topic(client, title="내일 주제", email="future@example.com")
+    _submit_topic(client, title="미배정 주제", email="open@example.com")
+    with get_session() as db:
+        room = db.exec(select(Room)).first()
+        slots = {slot.starts_at.date().isoformat(): slot for slot in db.exec(select(Timeslot))}
+    for topic_id, day in ((past_id, "2026-08-14"), (today_id, "2026-08-15"),
+                          (future_id, "2026-08-16")):
+        admin_client.post(f"/admin/topics/{topic_id}/schedule",
+                          data={"slot": f"{room.id}:{slots[day].id}"})
+
+    page = client.get("/topics").text
+    assert page.index("오늘 주제") < page.index("내일 주제")
+    assert page.index("내일 주제") < page.index("미배정 주제") < page.index("지난 주제")
 
 
 def test_admin_schedule_rejects_double_booking(client, admin_client):
@@ -986,6 +1122,21 @@ def test_board3_shows_registered_qr(client, admin_client):
     assert "주제 등록하기" not in page
     assert "Submit" in client.get("/board3?board_lang=en").text
     assert "https://example.com/board2-qr.png" not in client.get("/board2").text
+
+
+def test_board2_selects_today_by_default(client, admin_client, monkeypatch):
+    from datetime import date
+    from app.routes import public
+
+    monkeypatch.setattr(public, "_openspace_today", lambda: date(2026, 8, 16))
+    admin_client.post("/admin/rooms", data={"name": "1번 테이블", "sort_order": "0"})
+    for day in ("2026-08-15", "2026-08-16"):
+        admin_client.post("/admin/timeslots", data={
+            "date": day, "start_time": "13:30", "slot_minutes": "40",
+            "break_minutes": "0", "count": "1"})
+    page = client.get("/board2").text
+    selected_radio = page.split('id="b2day-1"', 1)[1][:100]
+    assert "checked" in selected_radio
 
 
 def test_admin_configures_scroll_board_url(client, admin_client):

@@ -151,6 +151,12 @@ def lightning_application_notice(session: Session) -> str:
     return (setting.application_notice or "").strip() if setting else ""
 
 
+def lightning_application_notice_en(session: Session) -> str:
+    """라이트닝토크 양일에 공통으로 쓰는 영문 신청 공지."""
+    setting = session.get(LightningSetting, 1)
+    return (setting.application_notice_en or "").strip() if setting else ""
+
+
 def lightning_qrs(session: Session, session_id: int | None = None) -> list[LightningQR]:
     """세션별(또는 공통) 라이트닝 전광판 QR 목록."""
     stmt = select(LightningQR)

@@ -634,15 +634,33 @@ PyCon identity / dev login as everyone else.)
 
 MVP does not require user management.
 
+### Lightning Talk on-site operator access
+
+`/light/admin` is a deliberately narrow exception for conference operations when
+PyCon login is impractical. It accepts `LIGHT_OPERATOR_PASSWORD`, stores the
+successful check in the signed app session, and unlocks only the Lightning Talk
+management routes implemented in `app/routes/light.py`. It must not unlock other
+`/admin/*` routes. Change the deployment password after the event.
+
+When a Lightning Talk date is closed (`is_open=False`), the public page remains
+available for that event day and new submissions receive `WAITLIST` status. The
+operator can later accept a waitlisted applicant and assign a presentation order.
+`LightningApplication.presentation_order` controls both the operator application
+list and the actual presentation sequence; rejected applications are always sorted last.
+
 ---
 
 # Environment Variables
 
-text DATABASE_URL BASE_URL ADMIN_EMAILS SESSION_SECRET UPLOAD_DIR DEV_LOGIN_ENABLED
+text DATABASE_URL BASE_URL ADMIN_EMAILS SESSION_SECRET LIGHT_OPERATOR_PASSWORD UPLOAD_DIR DEV_LOGIN_ENABLED
 
 `ADMIN_EMAILS` — comma-separated admin emails (case-insensitive); logging in with
 one grants admin. `DEV_LOGIN_ENABLED=1` enables `POST /dev/login` (manual identity for local dev/tests);
 leave unset in production (pycon.kr) where identity comes from server-verified PyCon
+
+`LIGHT_OPERATOR_PASSWORD` — password for the narrowly scoped `/light/admin` on-site
+operator gate. The current fallback is `1234` for the event operator's requested setup;
+set a strong deployment value and rotate or remove it after the event.
 
 `DEV_LOGIN_ENABLED=1` enables `POST /dev/login` (manual identity for local dev/tests);
 leave unset in production (pycon.kr) where identity comes from server-verified PyCon
@@ -703,7 +721,8 @@ Keyboard navigation must work.
 
 Do NOT implement:
 
-- Our own login / passwords (identity is read from the existing PyCon session — no app accounts)
+- Our own participant login / accounts (identity is read from the existing PyCon session — no app accounts;
+  the limited `/light/admin` operator-password exception is documented above)
 - User accounts (no account creation in this app)
 - OAuth
 - PyCon feature integration beyond the read-only server-side session check (no PyCon write APIs, no profile sync)

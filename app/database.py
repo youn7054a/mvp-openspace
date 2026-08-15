@@ -137,6 +137,11 @@ def _migrate_lightning_session() -> None:
             conn.execute(text(
                 "ALTER TABLE lightningsession ADD COLUMN venue_en VARCHAR NOT NULL DEFAULT ''"
             ))
+        setting_cols = _column_names(conn, "lightningsetting")
+        if setting_cols and "application_notice_en" not in setting_cols:
+            conn.execute(text(
+                "ALTER TABLE lightningsetting ADD COLUMN application_notice_en VARCHAR NOT NULL DEFAULT ''"
+            ))
 
 
 def _migrate_board_qr() -> None:

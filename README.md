@@ -2,9 +2,9 @@
 
 컨퍼런스 토론 주제 스케줄링 플랫폼 (A lightweight conference open-space scheduler).
 
-앱 자체에는 계정·비밀번호가 없습니다. 신원은 **PyCon 로그인**에서 오고, 주제 소유권은
+앱 자체에는 참가자 계정·비밀번호가 없습니다. 신원은 **PyCon 로그인**에서 오고, 주제 소유권은
 **PyCon 회원 id(서버 검증)** 로 확인합니다. 참가자가 직접 타임테이블 슬롯을 예약합니다.
-(No accounts/passwords here — identity & ownership come from PyCon login, server-verified.)
+(참가자 계정은 만들지 않으며, 예외적으로 현장 라이트닝 운영 화면만 별도 운영 비밀번호를 사용합니다.)
 
 ## 기술 스택 (Stack)
 
@@ -29,7 +29,8 @@
 - **전광판** (`/board`) — 전체 타임테이블을 **한 화면(무스크롤)** 카드로, 빈 슬롯도 "비어있음"으로 노출, 사진 배경, **표시 일자 선택 탭**, 45초 자동 새로고침(HTMX 폴링·깜빡임 없음)
 - **전광판 QR** (`/admin/board`) — 전광판에 노출할 QR 코드(이미지+설명)를 필요한 만큼 등록 (세로 한 줄, 행사 안내·설문 등)
 - **자동 전광판** (`/auto-board`) — 관리자가 등록한 여러 URL을 지정한 시간 간격으로 순서대로 표시
-- **라이트닝토크** (`/light`) — 해당 행사일에만 가능한 현장 신청, 관리자 합격·발표 순서·자료 URL 관리, 개인정보 없는 안내 전광판
+- **라이트닝토크** (`/light`) — 해당 행사일에만 가능한 현장 신청. 관리자가 신청을 마감하면 새 신청은 **대기자**로 등록되며, 운영자는 하나의 **발표 순서**로 신청 목록과 실제 발표 순서를 함께 정렬할 수 있음 (불합격자는 자동으로 맨 아래 이동)
+- **라이트닝 현장 운영** (`/light/admin`) — PyCon 로그인 없이 운영 비밀번호로 라이트닝 세션·신청자·합격/불합격·발표 순서·QR만 관리 (다른 관리자 기능은 열리지 않음)
 - **데모 데이터 시드** — 관리자 버튼 한 번으로 룸·슬롯·주제·배정 일괄 생성
 
 ## 환경 변수 (Environment variables)
@@ -40,6 +41,7 @@
 | `BASE_URL` | 외부 공개 주소 | `http://localhost:5001` |
 | `ADMIN_EMAILS` | 관리자 이메일(쉼표로 여러 개). 이 이메일로 로그인하면 관리자 | (빈값) |
 | `SESSION_SECRET` | 세션 쿠키 서명 키 | (개발용 기본값) |
+| `LIGHT_OPERATOR_PASSWORD` | 라이트닝 현장 운영 화면(`/light/admin`) 비밀번호 | `1234` |
 | `UPLOAD_DIR` | 업로드 이미지 저장 디렉토리 | `./uploads` |
 | `DEV_LOGIN_ENABLED` | **개발용 수기 로그인**(`/dev/login`) 허용 — 운영(pycon.kr)에선 미설정 | (빈값=꺼짐) |
 
@@ -54,10 +56,14 @@
 | `/manage/{topic_id}` | 내 주제 관리 — 신원 소유 확인, 편집/삭제/이미지. 일정은 타임테이블에서 |
 | `/schedule` | 타임테이블 (Timetable) — 주제·설명을 보이는 공개 읽기. `?topic={id}`이면 그 주제로 **자리 잡기** |
 | `/board` · `/board?date=YYYY-MM-DD` | 전광판 (Display Board) — `/board/live` 를 45초마다 HTMX 폴링 |
-| `/board2` | 테이블형 **열린공간 시간표** 전광판 — 장소·날짜·설명·QR을 포함한 화면 맞춤형 표시 |
+| `/board2` | 테이블형 **열린공간 시간표** 전광판 — 장소·날짜·주제 설명을 포함한 화면 맞춤형 표시 |
+| `/board3` | 열린공간 QR 전광판 — 등록·목록 QR만 표시 |
 | `/auto-board` | 자동 전광판 — 관리자가 등록한 URL을 순환 표시 |
+| `/scroll-board` | 스크롤 전광판 — 관리자가 지정한 내부 페이지를 전체 화면 자동 스크롤 |
+| `/programs` | 프로그램 소개 페이지 |
 | `/light` | 라이트닝토크 신청 — 관리자가 연 날짜별로 신청·내 자료 URL 수정 |
-| `/light/board` | 라이트닝토크 안내 전광판 — 일시·장소·안내·QR만 노출 |
+| `/light/admin` | 라이트닝 현장 운영 비밀번호 입구 — 통과 후 라이트닝 관리 기능만 사용 |
+| `/light/board` | 라이트닝토크 안내 전광판 — 제목과 신청 QR만 노출 |
 | `/admin` | 관리자 홈 — 주제 모더레이션·배정 / 데모 데이터 |
 | `/admin/timetable` | 타임테이블 짜기 — 그리드 빌더(시간·방 추가/수정/삭제) |
 | `/admin/rooms` · `/admin/timeslots` | 룸 관리 / 타임슬롯 관리(일괄 생성·닫기·라벨) |
@@ -192,6 +198,7 @@ SQLite DB 와 업로드 이미지는 컨테이너의 `/data` 에 저장됩니다
 | `BASE_URL` | `https://${{RAILWAY_PUBLIC_DOMAIN}}` ← 공개 도메인 참조 (외부 공개 주소) |
 | `ADMIN_EMAILS` | 관리자 PyCon 이메일(쉼표로 여러 개) |
 | `SESSION_SECRET` | `openssl rand -hex 32` 결과 |
+| `LIGHT_OPERATOR_PASSWORD` | 현장 운영자에게만 전달할 별도 강한 비밀번호 |
 | `DATABASE_URL` | `sqlite:////data/openspace.db` (볼륨 경로 — **슬래시 4개 = 절대경로**) |
 | `UPLOAD_DIR` | `/data/uploads` (볼륨 경로) |
 

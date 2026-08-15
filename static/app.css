@@ -899,6 +899,17 @@ body.scroll-board .scroll-board-content { position: fixed; inset: 0; width: 100v
 /* ---------- 라이트닝토크 (Lightning Talk) ---------- */
 .light-application, .light-admin-session { margin: 1.5rem 0; padding: 1.25rem; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
 .light-when, .light-status { font-weight: 700; color: var(--foreground); }
+.light-closed-notice {
+  margin: 1rem 0; padding: 1rem 1.15rem; border: 3px solid var(--danger); border-radius: 8px;
+  background: rgba(255, 90, 106, .12); color: var(--foreground); font-weight: 700;
+}
+.light-closed-notice p { margin: 0; }
+.light-closed-title { margin-bottom: .35rem !important; color: var(--danger); font-size: 1.2rem; font-weight: 900; letter-spacing: .06em; }
+.light-admin-closed { margin: .7rem 0 0; color: var(--danger); font-weight: 800; }
+/* 불합격 신청은 목록 전체를 취소선으로 표시해 운영 중 혼동을 막는다. */
+.light-application-rejected td { color: var(--ink-soft); text-decoration: line-through; opacity: .72; }
+.light-application-rejected td:last-child,
+.light-application-rejected td:last-child * { text-decoration: none; opacity: 1; }
 @keyframes light-notice-pulse {
   0%, 100% { transform: scale(1); box-shadow: 0 0 0 rgba(245, 201, 61, 0); }
   50% { transform: scale(1.015); box-shadow: 0 0 1.2rem rgba(245, 201, 61, .45); }
