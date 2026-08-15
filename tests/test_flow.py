@@ -685,6 +685,17 @@ def test_nav_shows_participant_items_only(client):
     assert "전광판 (Display Board)" not in nav
 
 
+def test_topics_list_shows_openspace_location(client):
+    page = client.get("/topics")
+    assert "원흥관 3층 i.SPACE에서 열립니다" in page.text
+
+
+def test_topic_submission_shows_openspace_location(client):
+    login(client, "location@example.com")
+    page = client.get("/")
+    assert "원흥관 3층 i.SPACE에서 열립니다" in page.text
+
+
 def test_programs_page_lists_all_programs(client):
     page = client.get("/programs")
     assert page.status_code == 200
