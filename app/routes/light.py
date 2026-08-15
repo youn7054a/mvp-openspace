@@ -504,26 +504,17 @@ def register(app) -> None:
             set_lang(board_lang)
         note_identity(identity_from_session(session))
         with get_session() as db:
-            # 신청을 닫아도 오늘의 전광판 안내(일시·장소·QR)는 계속 보여 준다.
-            item = next((row for row in lightning_sessions(db)
-                         if row.session_date == _today()), None)
             qrs = lightning_qrs(db)[:1]
             language_interval = board_language_interval(db)
-        board_title = item.board_title if item and item.board_title else t(
-            "파이콘 한국 라이트닝 토크", "PyCon Korea Lightning Talk")
-        cards = ([Section(
-                H2(f"{item.session_date:%Y년 %m월 %d일}"),
-                P(" · ".join(x for x in [_time_label(item.starts_at), item.venue] if x), cls="light-board-when"),
-                P(item.description or t("정규 세션 종료 후 진행됩니다.", "Held after the regular sessions."), cls="light-board-description"),
-                Div(P(t("라이트닝토크 신청", "Lightning Talk Application"), cls="light-board-qr-title"),
-                    *[Div(Img(src=qr.image_url, alt=qr.caption or "QR", cls="light-board-qr-img"),
-                             P(qr.caption, cls="light-board-qr-caption"), cls="light-board-qr") for qr in qrs],
-                    cls="light-board-qrs"), cls="light-board-card")]
-                 if item else [])
+        # 전광판은 신청 QR만 빠르게 인지하는 용도다. 날짜·시간·장소·안내문·QR 캡션 등
+        # 관리자 입력 내용은 노출하지 않는다.
+        qr_content = Div(
+            *[Img(src=qr.image_url, alt=t("라이트닝 토크 신청 QR 코드", "Lightning Talk application QR code"),
+                  cls="light-board-qr-img") for qr in qrs if qr.image_url],
+            cls="light-board-qr-only",
+        )
         return layout(t("라이트닝 토크", "Lightning Talk"),
-                      H1(board_title),
-                      P(t("현장 신청을 받습니다. 정규 세션 종료 후 진행됩니다.",
-                          "On-site applications are open. Held after the regular sessions."), cls="light-board-lead"),
-                      *(cards if cards else [notice(t("현재 안내할 라이트닝토크가 없습니다.", "No Lightning Talk is currently announced."))]),
+                      H1(t("라이트닝 토크", "Lightning Talk"), cls="light-board-title"),
+                      qr_content,
                       board_language_auto_switch(language_interval),
                       chrome=False, main_cls="light-board-content", body_cls="light-board")

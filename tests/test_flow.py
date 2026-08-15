@@ -145,13 +145,14 @@ def test_lightning_application_admin_flow_and_private_data(client, admin_client,
     with get_session() as db:
         assert db.get(LightningApplication, second_app.id).status == LightningStatus.PENDING
 
-    # 관리자는 연락처·자료 URL을 보지만 공개 전광판에는 신청자·발표 자료를 싣지 않는다.
+    # 관리자는 연락처·자료 URL을 보지만 공개 전광판은 라이트닝 토크와 QR만 표시한다.
     admin_page = admin_client.get(f"/admin/light/applications?session_id={first_id}").text
     assert "speaker@example.com" in admin_page and "자료 열기" in admin_page
     monkeypatch.setattr(light, "_today", lambda: date(2026, 8, 15))
     board = client.get("/light/board").text
-    assert "오늘의 라이트닝 토크" in board and "18시 00분" in board
-    assert "원흥관 3층" in board and "신청 안내" in board
+    assert "라이트닝 토크" in board
+    assert "오늘의 라이트닝 토크" not in board and "18시 00분" not in board
+    assert "원흥관 3층" not in board and "신청 안내" not in board
     assert "speaker@example.com" not in board and "나의 라이트닝 스토리" not in board
 
 
@@ -911,8 +912,9 @@ def test_board3_shows_registered_qr(client, admin_client):
     })
     page = client.get("/board3").text
     assert "https://example.com/board2-qr.png" in page
-    assert "주제 등록하기" in page
-    assert "Submit a topic" in client.get("/board3?board_lang=en").text
+    assert "열린공간" in page and "등록" in page
+    assert "주제 등록하기" not in page
+    assert "Submit" in client.get("/board3?board_lang=en").text
     assert "https://example.com/board2-qr.png" not in client.get("/board2").text
 
 
