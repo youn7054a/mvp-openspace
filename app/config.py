@@ -32,6 +32,9 @@ class Settings:
             os.getenv("DEV_LOGIN_ENABLED", "").strip().lower()
             in {"1", "true", "yes", "on"}
         )
+        # 현장 라이트닝 운영자용 별도 비밀번호. PyCon 로그인 없이 라이트닝 관리만 허용.
+        # 행사 종료 후에는 반드시 환경 변수에서 변경하거나 비워 두는 것을 권장한다.
+        self.light_operator_password: str = os.getenv("LIGHT_OPERATOR_PASSWORD", "1234")
 
 
 @lru_cache

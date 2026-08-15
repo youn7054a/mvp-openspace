@@ -215,6 +215,18 @@ def test_admin_can_upload_lightning_qr_image(admin_client, client, monkeypatch):
     assert qr.image_url in client.get("/light/board").text
 
 
+def test_light_operator_password_grants_lightning_admin_only(client):
+    gate = client.get("/light/admin")
+    assert gate.status_code == 200 and "운영 비밀번호" in gate.text
+    denied = client.post("/light/admin/login", data={"password": "wrong"})
+    assert "비밀번호가 올바르지 않습니다" in denied.text
+    opened = client.post("/light/admin/login", data={"password": "1234"}, follow_redirects=False)
+    assert opened.status_code == 303 and opened.headers["location"] == "/admin/light"
+    assert client.get("/admin/light").status_code == 200
+    client.post("/light/admin/logout")
+    assert client.get("/admin/light", follow_redirects=False).status_code == 303
+
+
 def test_optional_nickname_and_image_url(client):
     # 별명 없이 + 이미지 URL 로 제출 (no nickname, with image URL). 이메일은 신원에서.
     login(client, "img@example.com")
