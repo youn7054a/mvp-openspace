@@ -34,6 +34,7 @@ from starlette.datastructures import UploadFile
 from ..components import (
     account_field,
     board_language_auto_switch,
+    day_caption,
     date_tabs,
     fmt_day_short,
     layout,
@@ -70,6 +71,7 @@ from ..queries import (
     is_scheduling_open,
     schedule_map,
     room_slot_closures,
+    scroll_board_url,
     scheduling_opens_on,
     topics_by_id,
     topics_for_owner,
@@ -128,6 +130,55 @@ _LIVE_PREVIEW_JS = """
   syncText();
 })();
 """
+
+
+# 프로그램 소개는 운영 중에도 전광판의 스크롤 대상(/scroll-board)으로 바로 쓸 수 있는
+# 고정 안내 페이지다. 외부 링크 주소가 확정되지 않은 항목은 문구만 우선 노출한다.
+PROGRAMS = (
+    {
+        "title": "열린 공간",
+        "when": "8/15(토) ~ 16(일) 13:30 ~ 17:10 (예정) (KST)",
+        "venue": "원흥관 3층 I-Space",
+        "link_label": "열린 공간 전자게시판",
+        "link_url": "/topics",
+        "description": "열린공간은 파이콘 참가자들이 사전 또는 현장에서 자유롭게 주제를 정해, 1시간 동안 함께 모이는 자율 모임입니다. 기술 토론부터 보드게임, 요가, 산책 같은 가벼운 활동까지 누구나 직접 만들고 참여할 수 있는 네트워킹 프로그램입니다.",
+    },
+    {
+        "title": "저글링",
+        "when": "8/15(토) ~ 16(일) (KST)",
+        "venue": "추후 공개 (공이 어디로 튈지 모르듯, 장소도 아직 미정입니다 🎾)",
+        "link_label": "파이콘 US 저글링",
+        "description": "코딩도 잠깐 내려두고, 이번엔 공을 올려보세요! 저글링은 생각보다 어렵고, 생각보다 재밌습니다. 잘 못해도 괜찮아요 — 실패해도 try again하면 되니까요. 🔄",
+    },
+    {
+        "title": "작품 전시전",
+        "when": "8/15(토) ~ 16(일) (KST)",
+        "venue": "신공학관 3106호",
+        "link_label": "작품 전시전 모집폼 (~7/25.토)",
+        "description": "간단한 콘솔 앱부터 라이브러리, 업무 자동화 도구, 챗봇 등등 파이썬으로 만든 것이라면 무엇이든 선보일 수 있는 절호의 기회! 파이썬으로 뚝딱뚝딱 만든 소중한 작품과 경험을 나누고 자랑할 수 있는 '파이썬 작품 전시전'입니다.",
+    },
+    {
+        "title": "파이콘 네임월",
+        "when": "8/15(토) ~ 16(일) (KST)",
+        "venue": "신공학관 7층 (원흥관 연결 통로)",
+        "description": "참가자 여러분의 이름이 모여, 올해의 파이콘 한국이 되었습니다. 우리가 함께 그린 파이콘 한국 속에서 본인의 이름을 찾아보세요!",
+        "note": "7/31.(금)까지 등록한 일반 티켓, 개인 후원 티켓, 기업 후원 티켓, 학생 티켓, 후원사 티켓 참가자만 해당되는 이벤트입니다.",
+    },
+    {
+        "title": "파이펀 퀴즈",
+        "when": "8/15(토) ~ 16(일) 11:40 ~ 12:00 (KST)",
+        "venue": "신공학관 4층 4142호 (대강당)",
+        "description": "점심 시간 4142호로! 코딩 몰라도 파이썬에 관심있는 누구나 참여 가능한 20분 컷 PyFun 퀴즈쇼",
+        "note": "파이콘 참여자 누구나!",
+    },
+    {
+        "title": "파이북",
+        "when": "8/15(토) ~ 16(일) 11:40 ~ 12:00 (KST)",
+        "venue": "신공학관 4층 4147호",
+        "description": "도서 감상평을 작성하고 책을 받아가세요! 도서를 선택하여 태그와 함께 SNS에 감상평을 게시하거나 손글씨 감상평을 작성해주세요. 서로의 책에 대한 소개와 소감을 나누며 마무리됩니다.",
+        "note": "파이콘 참여자 누구나! 선착순으로 진행되며 조기마감될 수 있습니다.",
+    },
+)
 
 
 def _live_preview_js() -> str:
@@ -647,6 +698,50 @@ def register(app) -> None:
             Section(*body, cls="topic-grid"),
         )
 
+    @app.get("/programs")
+    def programs_page(session):
+        # nav 관리자 탭을 위해 세션 캐시 신원을 반영한다.
+        note_identity(identity_from_session(session))
+        cards = []
+        for program in PROGRAMS:
+            related = None
+            if program.get("link_url"):
+                related = P(
+                    Span("관련 링크: ", cls="program-label"),
+                    A(program["link_label"], href=program["link_url"], cls="program-link"),
+                    cls="program-related",
+                )
+            elif program.get("link_label"):
+                related = P(
+                    Span("관련 링크: ", cls="program-label"),
+                    Span(program["link_label"]),
+                    cls="program-related",
+                )
+            cards.append(Article(
+                H2(program["title"]),
+                Div(
+                    P(Span("운영시간", cls="program-label"), program["when"]),
+                    P(Span("장소", cls="program-label"), program["venue"]),
+                    cls="program-meta",
+                ),
+                related,
+                P(program["description"], cls="program-description"),
+                P(program["note"], cls="program-note") if program.get("note") else None,
+                cls="program-card",
+            ))
+        return layout(
+            "프로그램 소개",
+            Section(
+                H1("프로그램 소개"),
+                P("PyCon Korea 2026에서 함께 즐길 수 있는 프로그램을 소개합니다.",
+                  cls="program-lede"),
+                cls="program-intro",
+            ),
+            Section(*cards, cls="program-grid"),
+            active="/programs",
+            main_cls="content programs-page",
+        )
+
     @app.get("/topics/new")
     def topic_new_form():
         # 주제 등록 폼은 이제 홈(/)에 있다 — 옛 경로는 홈으로 보낸다.
@@ -928,6 +1023,49 @@ def register(app) -> None:
             chrome=False, main_cls="auto-board-content", body_cls="auto-board",
         )
 
+    @app.get("/scroll-board")
+    def scroll_board():
+        """관리자가 지정한 내부 페이지를 전체화면으로 천천히 자동 스크롤한다."""
+        with get_session() as db:
+            url = scroll_board_url(db)
+        if not url:
+            return layout(
+                t("스크롤 전광판", "Scroll Board"),
+                Div(P(t("관리자에서 스크롤할 내부 URL을 등록해 주세요.",
+                        "Set an internal URL to scroll in the admin page.")), cls="auto-board-empty"),
+                chrome=False, main_cls="scroll-board-content", body_cls="scroll-board",
+            )
+        scroll_script = """
+        (() => {
+          const frame = document.getElementById('scroll-board-frame');
+          const start = () => {
+            const win = frame.contentWindow;
+            const doc = frame.contentDocument;
+            if (!win || !doc) return;
+            const step = () => {
+              const root = doc.documentElement;
+              const max = Math.max(root.scrollHeight, doc.body ? doc.body.scrollHeight : 0) - win.innerHeight;
+              if (win.scrollY >= max - 1) {
+                window.setTimeout(() => { win.scrollTo(0, 0); window.setTimeout(step, 800); }, 2000);
+                return;
+              }
+              win.scrollBy(0, 1);
+              window.setTimeout(step, 16);
+            };
+            win.scrollTo(0, 0);
+            window.setTimeout(step, 800);
+          };
+          frame.addEventListener('load', start);
+        })();
+        """
+        return layout(
+            t("스크롤 전광판", "Scroll Board"),
+            Div(Iframe(src=url, id="scroll-board-frame", title=t("스크롤 전광판", "Scroll Board"),
+                       cls="scroll-board-frame"),
+                Script(scroll_script), cls="scroll-board-player"),
+            chrome=False, main_cls="scroll-board-content", body_cls="scroll-board",
+        )
+
     @app.get("/board/live")
     def board_live(date: str = "", board_lang: str = ""):
         # HTMX 폴링 대상 — board-live div 만 반환해 outerHTML 로 교체(깜빡임 없음)
@@ -1048,27 +1186,38 @@ def _board2_live(board_lang: str = ""):
         events = events_by_timeslot(session)
 
     if not rooms or not timeslots:
-        body = schedule_table(rooms, timeslots, slots, topics, events=events,
-                              room_closures=closures)
+        body = Div(
+            Div(H1(t("열린공간 시간표", "OpenSpace Timetable")), cls="board2-title-row"),
+            schedule_table(rooms, timeslots, slots, topics, events=events,
+                           room_closures=closures),
+            cls="board2-day-content",
+        )
     else:
         days = sorted({ts.starts_at.date().isoformat() for ts in timeslots})
 
         def render_day(day: str):
             day_timeslots = [ts for ts in timeslots
                              if ts.starts_at.date().isoformat() == day]
-            return schedule_table(rooms, day_timeslots, slots, topics, events=events,
-                                  room_closures=closures,
-                                  show_descriptions=True, show_background_images=True,
-                                  merge_event_time=True,
-                                  hide_fully_closed_rows=True,
-                                  open_label=t("비어있습니다. 열린공간 주제를 넣어주세요!",
-                                               "Open — add an OpenSpace topic!"))
+            return Div(
+                Div(
+                    H1(t("열린공간 시간표", "OpenSpace Timetable")),
+                    day_caption(day, suffix=""),
+                    cls="board2-title-row",
+                ),
+                schedule_table(rooms, day_timeslots, slots, topics, events=events,
+                               room_closures=closures,
+                               show_descriptions=True, show_background_images=True,
+                               merge_event_time=True,
+                               hide_fully_closed_rows=True,
+                               open_label=t("비어있습니다. 열린공간 주제를 넣어주세요!",
+                                            "Open — add an OpenSpace topic!")),
+                cls="board2-day-content",
+            )
 
         body = date_tabs(days, render_day, id_prefix="b2day", panel_display="flex")
 
     return Div(
         Div(
-            H1(t("열린공간 시간표", "OpenSpace Timetable")),
             P(
                 t("원흥관 3층 ", "Wonheung Hall 3F "),
                 Span("i.SPACE-아이닷스페이스", cls="board2-location-name"),

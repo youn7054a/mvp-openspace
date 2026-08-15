@@ -684,6 +684,14 @@ def test_nav_shows_participant_items_only(client):
     assert "전광판 (Display Board)" not in nav
 
 
+def test_programs_page_lists_all_programs(client):
+    page = client.get("/programs")
+    assert page.status_code == 200
+    for title in ["열린 공간", "저글링", "작품 전시전", "파이콘 네임월", "파이펀 퀴즈", "파이북"]:
+        assert title in page.text
+    assert 'href="/topics"' in page.text
+
+
 def _submit(client, *, email, title, pycon_id=0):
     login(client, email, pycon_id)
     r = client.post("/topics/new", data={"title": title, "description": "d"})
@@ -953,6 +961,13 @@ def test_board3_shows_registered_qr(client, admin_client):
     assert "주제 등록하기" in page
     assert "Submit a topic" in client.get("/board3?board_lang=en").text
     assert "https://example.com/board2-qr.png" not in client.get("/board2").text
+
+
+def test_admin_configures_scroll_board_url(client, admin_client):
+    admin_client.post("/admin/scroll-board", data={"url": "/topics"})
+    page = client.get("/scroll-board").text
+    assert 'src="/topics"' in page
+    assert "scroll-board-frame" in page
 
 
 def test_board_shows_full_timetable(client, admin_client):

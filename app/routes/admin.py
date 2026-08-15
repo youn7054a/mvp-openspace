@@ -40,7 +40,7 @@ from ..components import field, layout, notice
 from ..database import get_session
 from ..i18n import t
 from ..models import (AutoBoardURL, BoardLanguageSetting, BoardQR, Room, RoomSlotClosure,
-                      ScheduleEntry, Timeslot, Topic, TopicKind, utcnow)
+                      ScheduleEntry, ScrollBoardSetting, Timeslot, Topic, TopicKind, utcnow)
 from ..queries import (
     all_rooms,
     all_timeslots,
@@ -50,6 +50,7 @@ from ..queries import (
     entry_for_topic,
     schedule_map,
     room_slot_closures,
+    scroll_board_url,
     topics_by_id,
 )
 from ..auth import identity_from_session, is_admin_email, note_identity
@@ -69,6 +70,7 @@ def _admin_layout(title, *content):
         A(t("타임슬롯", "Timeslots"), href="/admin/timeslots", cls="nav-link"), " · ",
         A(t("전광판 QR", "Board QR"), href="/admin/board", cls="nav-link"), " · ",
         A(t("자동 전광판", "Auto Board"), href="/admin/auto-board", cls="nav-link"), " · ",
+        A(t("스크롤 전광판", "Scroll Board"), href="/admin/scroll-board", cls="nav-link"), " · ",
         A(t("라이트닝토크", "Lightning Talk"), href="/admin/light", cls="nav-link"), " · ",
         A(t("← 사이트로", "← Site"), href="/", cls="nav-link"),
         cls="admin-nav",
@@ -949,6 +951,48 @@ def register(app) -> None:
                 db.delete(item)
                 db.commit()
         return RedirectResponse("/admin/auto-board", status_code=303)
+
+    # ---- 자동 스크롤 전광판 (Auto-scrolling webpage) ----
+    @app.get("/admin/scroll-board")
+    def admin_scroll_board(session):
+        if (redir := _require_admin(session)):
+            return redir
+        with get_session() as db:
+            url = scroll_board_url(db)
+        return _admin_layout(
+            t("스크롤 전광판", "Scroll Board"),
+            H2(t("자동 스크롤 전광판", "Auto-scrolling board")),
+            P(t("같은 서비스의 내부 주소를 전체화면으로 열고, 페이지를 아래로 자동 스크롤합니다.",
+                "Opens an internal page fullscreen and scrolls it down automatically."),
+              cls="field-help"),
+            P(A(t("스크롤 전광판 열기", "Open Scroll Board"), href="/scroll-board",
+                target="_blank", cls="btn secondary")),
+            Form(
+                field(t("스크롤할 내부 URL", "Internal URL to scroll"), "url", value=url,
+                      placeholder="/topics"),
+                Button(t("저장", "Save"), type="submit"),
+                method="post", action="/admin/scroll-board",
+            ),
+        )
+
+    @app.post("/admin/scroll-board")
+    def admin_scroll_board_save(session, url: str = ""):
+        if (redir := _require_admin(session)):
+            return redir
+        url = (url or "").strip()
+        if not (url.startswith("/") and not url.startswith("//")):
+            return _admin_layout(
+                t("스크롤 전광판", "Scroll Board"),
+                notice(t("/로 시작하는 내부 주소만 입력할 수 있습니다.",
+                         "Only an internal path starting with / is allowed."), kind="error"),
+                A(t("돌아가기", "Back"), href="/admin/scroll-board", cls="btn secondary"),
+            )
+        with get_session() as db:
+            setting = db.get(ScrollBoardSetting, 1) or ScrollBoardSetting(id=1)
+            setting.url, setting.updated_at = url, utcnow()
+            db.add(setting)
+            db.commit()
+        return RedirectResponse("/admin/scroll-board", status_code=303)
 
     # ---- 룸 관리 (Room management) ----
     @app.get("/admin/rooms")

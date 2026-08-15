@@ -50,6 +50,7 @@ def nav_items():
         ("/", t("주제 등록", "Submit Topic")),
         ("/topics", t("주제 목록", "Topic List")),
         ("/schedule", t("타임테이블", "Timetable")),
+        ("/programs", t("프로그램 소개", "Programs")),
         ("/light", t("라이트닝토크", "Lightning Talk")),
         ("/my", t("내 주제", "MY")),
     ]

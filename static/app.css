@@ -245,6 +245,30 @@ button:active, .btn:active { transform: translateY(1px); }
 .btn-pin::before { content: "\25B6"; font-size: .8em; }  /* ▶ 아케이드 화살표 */
 .form-hint { margin: 1rem 0 0; font-size: .78rem; color: var(--ink-soft); font-family: var(--font-mono); line-height: 1.7; }
 
+/* ---------- 프로그램 소개 (/programs) ---------- */
+.program-intro { max-width: 48rem; margin: .5rem 0 2rem; }
+.program-intro h1 { margin: 0 0 .7rem; color: var(--primary); }
+.program-lede { margin: 0; color: var(--ink-soft); }
+.program-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 21rem), 1fr));
+  gap: 1.25rem;
+}
+.program-card {
+  display: flex; flex-direction: column; min-width: 0; padding: 1.35rem;
+  background: var(--card); border: 2px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 0 18px rgba(0,0,0,.2);
+}
+.program-card:hover { border-color: var(--primary); box-shadow: 0 0 14px var(--primary-soft); }
+.program-card h2 { margin: 0 0 1rem; color: var(--primary); font-size: 1.2rem; line-height: 1.5; }
+.program-meta { padding: .8rem 0; border-top: 1px dashed var(--border); border-bottom: 1px dashed var(--border); }
+.program-meta p, .program-related, .program-description, .program-note { margin: 0; }
+.program-meta p + p { margin-top: .45rem; }
+.program-label { display: inline-block; min-width: 4.8rem; margin-right: .45rem; color: var(--accent); font-family: var(--font-mono); font-size: .76rem; }
+.program-related { margin-top: .85rem; color: var(--ink-soft); font-size: .84rem; }
+.program-link { font-weight: 700; }
+.program-description { margin-top: 1rem; color: var(--foreground); line-height: 1.8; word-break: keep-all; }
+.program-note { margin-top: 1rem; padding-top: .8rem; border-top: 1px dashed var(--border); color: var(--accent); font-size: .84rem; line-height: 1.7; }
+
 /* 미리보기 카드 (Preview card) — 네온 액자 */
 .pin-preview { position: sticky; top: 1.5rem; padding-top: .5rem; min-width: 0; }
 .pin { display: none; }   /* 압정 대신 네온 테두리 (no pushpin in neon theme) */
@@ -546,10 +570,6 @@ body.board2 .board2-content {
 }
 body.board2 #board2-live { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 body.board2 #board2-live > .board2-head { flex: 0 0 auto; margin: 0 0 .35vh; }
-body.board2 #board2-live > .board2-head h1 {
-  flex: 0 0 auto; margin: 0 0 .3vh;
-  font-size: clamp(1.25rem, min(4.2vh, 2.8vw), 3.1rem);
-}
 body.board2 .board2-location {
   margin: 0; font-size: clamp(.9rem, min(2.55vh, 1.65vw), 1.65rem); color: #333; line-height: 1.4;
 }
@@ -562,6 +582,12 @@ body.board2 .daytabs .day-panels { flex: 1 1 auto; min-height: 0; display: flex;
 body.board2 .daytabs .day-panel,
 body.board2 .daytabs-single { height: 100%; min-height: 0; flex-direction: column; }
 body.board2 .daytabs-single { flex: 1 1 auto; display: flex; }
+body.board2 .day-panel > .day-caption,
+body.board2 .daytabs-single > .day-caption { display: none; }
+body.board2 .board2-day-content { flex: 1 1 auto; min-height: 0; height: 100%; display: flex; flex-direction: column; }
+body.board2 .board2-title-row { display: flex; align-items: baseline; gap: clamp(.4rem, 1vw, 1.2rem); margin: 0 0 .35vh; }
+body.board2 .board2-title-row h1 { margin: 0; font-size: clamp(1.25rem, min(4.2vh, 2.8vw), 3.1rem); }
+body.board2 .board2-title-row .day-caption { margin: 0; padding: 0; border: 0; font-size: clamp(.85rem, min(2.5vh, 1.6vw), 1.7rem); white-space: nowrap; }
 body.board2 .day-caption {
   margin: .1rem 0 .35rem; padding: .2rem 0;
   font-size: clamp(.95rem, min(2.7vh, 1.75vw), 1.9rem);
@@ -662,6 +688,11 @@ body.auto-board .auto-board-content {
   display: grid; place-items: center; width: 100%; height: 100%; padding: 2rem;
   color: #111; font-family: var(--font-body); background: #fff; text-align: center;
 }
+/* 자동 스크롤 전광판 */
+body.scroll-board { margin: 0; width: 100vw; height: 100vh; overflow: hidden; background: #fff; }
+body.scroll-board .scroll-board-content { position: fixed; inset: 0; width: 100vw; max-width: none; height: 100vh; margin: 0; padding: 0; }
+.scroll-board-player { position: fixed; inset: 0; width: 100vw; height: 100vh; }
+.scroll-board-frame { display: block; width: 100%; height: 100%; border: 0; }
 /* HTMX 폴링 컨테이너 — head + board-body 를 담는 내부 플렉스 컬럼 */
 #board-live {
   flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 1vh;

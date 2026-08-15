@@ -161,6 +161,14 @@ class AutoBoardURL(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class ScrollBoardSetting(SQLModel, table=True):
+    """자동 스크롤 전광판 설정 (단일 행, id=1)."""
+
+    id: int = Field(default=1, primary_key=True)
+    url: str = ""
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class LightningStatus(str, Enum):
     """라이트닝토크 신청 상태 (Lightning talk application status)."""
 
