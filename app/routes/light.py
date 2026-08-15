@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from hmac import compare_digest
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
@@ -12,6 +13,7 @@ from starlette.datastructures import UploadFile
 
 from ..auth import identity_from_session, login_required_page, note_identity, resolve_identity
 from ..components import board_language_auto_switch, field, layout, notice
+from ..config import get_settings
 from ..database import get_session
 from ..i18n import get_lang, set_lang, t
 from ..models import LightningApplication, LightningQR, LightningSession, LightningSetting, LightningStatus, utcnow
@@ -27,6 +29,9 @@ def _admin_layout(title, *content):
 
 
 def _require_admin(session):
+    # 현장 운영자는 라이트닝 관리 경로에만 비밀번호로 접근할 수 있다.
+    if session.get("light_operator_authenticated"):
+        return None
     from .admin import _require_admin as base_require_admin
     return base_require_admin(session)
 
@@ -196,6 +201,43 @@ def _admin_application_rows(applications, session_id: int):
 
 
 def register(app) -> None:
+    @app.get("/light/admin")
+    def light_operator_login(session):
+        """PyCon 로그인 없이 현장 라이트닝 운영 화면으로 들어가는 비밀번호 입구."""
+        if session.get("light_operator_authenticated"):
+            return RedirectResponse("/admin/light", status_code=303)
+        return layout(
+            t("라이트닝토크 운영", "Lightning Talk Operations"),
+            H1(t("라이트닝토크 운영", "Lightning Talk Operations")),
+            P(t("현장 운영 전용 페이지입니다. 비밀번호를 입력해 주세요.",
+                "This page is for on-site operators. Enter the password."), cls="field-help"),
+            Form(
+                field(t("운영 비밀번호", "Operator password"), "password", input_type="password"),
+                Button(t("열기", "Open"), type="submit"),
+                method="post", action="/light/admin/login",
+            ),
+            active="/light",
+        )
+
+    @app.post("/light/admin/login")
+    def light_operator_login_submit(session, password: str = ""):
+        configured = get_settings().light_operator_password
+        if configured and compare_digest(password or "", configured):
+            session["light_operator_authenticated"] = True
+            return RedirectResponse("/admin/light", status_code=303)
+        return layout(
+            t("라이트닝토크 운영", "Lightning Talk Operations"),
+            H1(t("라이트닝토크 운영", "Lightning Talk Operations")),
+            notice(t("비밀번호가 올바르지 않습니다.", "The password is incorrect."), kind="error"),
+            A(t("다시 입력", "Try again"), href="/light/admin", cls="btn secondary"),
+            active="/light",
+        )
+
+    @app.post("/light/admin/logout")
+    def light_operator_logout(session):
+        session.pop("light_operator_authenticated", None)
+        return RedirectResponse("/light/admin", status_code=303)
+
     @app.get("/light")
     def light_page(request, session):
         identity = resolve_identity(request, session)
