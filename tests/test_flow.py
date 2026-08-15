@@ -1124,6 +1124,21 @@ def test_board3_shows_registered_qr(client, admin_client):
     assert "https://example.com/board2-qr.png" not in client.get("/board2").text
 
 
+def test_board2_selects_today_by_default(client, admin_client, monkeypatch):
+    from datetime import date
+    from app.routes import public
+
+    monkeypatch.setattr(public, "_openspace_today", lambda: date(2026, 8, 16))
+    admin_client.post("/admin/rooms", data={"name": "1번 테이블", "sort_order": "0"})
+    for day in ("2026-08-15", "2026-08-16"):
+        admin_client.post("/admin/timeslots", data={
+            "date": day, "start_time": "13:30", "slot_minutes": "40",
+            "break_minutes": "0", "count": "1"})
+    page = client.get("/board2").text
+    selected_radio = page.split('id="b2day-1"', 1)[1][:100]
+    assert "checked" in selected_radio
+
+
 def test_admin_configures_scroll_board_url(client, admin_client):
     admin_client.post("/admin/scroll-board", data={"url": "/topics"})
     page = client.get("/scroll-board").text

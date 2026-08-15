@@ -1240,7 +1240,10 @@ def _board2_live(board_lang: str = ""):
                 cls="board2-day-content",
             )
 
-        body = date_tabs(days, render_day, id_prefix="b2day", panel_display="flex")
+        # 전광판은 당일 일정을 기본으로 보여 준다. 당일 슬롯이 없을 때만 첫 날짜로 폴백.
+        today = _openspace_today().isoformat()
+        body = date_tabs(days, render_day, id_prefix="b2day", default_day=today,
+                         panel_display="flex")
 
     return Div(
         Div(
