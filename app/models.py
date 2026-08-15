@@ -173,6 +173,7 @@ class LightningStatus(str, Enum):
     """라이트닝토크 신청 상태 (Lightning talk application status)."""
 
     PENDING = "pending"
+    WAITLIST = "waitlist"
     ACCEPTED = "accepted"
     REJECTED = "rejected"
 
@@ -198,11 +199,12 @@ class LightningSetting(SQLModel, table=True):
 
     id: int = Field(default=1, primary_key=True)
     application_notice: str = ""
+    application_notice_en: str = ""
     updated_at: datetime = Field(default_factory=utcnow)
 
 
 class LightningApplication(SQLModel, table=True):
-    """라이트닝토크 신청 — 합격자만 날짜별 발표 순서를 가진다."""
+    """라이트닝토크 신청 — 하나의 발표 순서로 목록과 진행 순서를 관리한다."""
 
     __table_args__ = (
         UniqueConstraint("session_id", "applicant_pycon_id",

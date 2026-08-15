@@ -642,6 +642,12 @@ successful check in the signed app session, and unlocks only the Lightning Talk
 management routes implemented in `app/routes/light.py`. It must not unlock other
 `/admin/*` routes. Change the deployment password after the event.
 
+When a Lightning Talk date is closed (`is_open=False`), the public page remains
+available for that event day and new submissions receive `WAITLIST` status. The
+operator can later accept a waitlisted applicant and assign a presentation order.
+`LightningApplication.presentation_order` controls both the operator application
+list and the actual presentation sequence; rejected applications are always sorted last.
+
 ---
 
 # Environment Variables
