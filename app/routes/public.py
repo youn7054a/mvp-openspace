@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from fasthtml.common import (
     A,
@@ -188,6 +190,11 @@ def _live_preview_js() -> str:
         t("설명을 입력하세요", "Enter a description"),
         t("익명", "Anonymous"),
     )
+
+
+def _openspace_today() -> date:
+    """주제 목록의 지난 일정 판단은 행사 현장 시간(Asia/Seoul)을 기준으로 한다."""
+    return datetime.now(ZoneInfo("Asia/Seoul")).date()
 
 
 def _new_error(message: str):
@@ -652,6 +659,7 @@ def register(app) -> None:
         note_identity(identity_from_session(session))
         with get_session() as db:
             topics = active_topics(db)
+            today = _openspace_today()
             slots = schedule_map(db)
             # topic_id -> (정렬 시각, 테이블 순서, 배정 정보)
             rooms = {r.id: r for r in all_rooms(db)}
@@ -677,11 +685,22 @@ def register(app) -> None:
                             f"{ts.starts_at:%Y.%m.%d} · {ts.time_label} · {t('이벤트', 'Event')}",
                         )
 
-            # 배정된 주제 우선 → 날짜 → 시간 → 테이블 순. 미배정 주제는 기존 생성순 유지.
+            # 오늘·예정 일정은 가까운 순으로 가장 먼저, 미배정 주제는 그 다음,
+            # 과거 일정은 맨 아래에 둔다. 과거 일정도 기록으로 남겨 숨기지 않는다.
             indexed_topics = list(enumerate(topics))
-            indexed_topics.sort(key=lambda item: (
-                0, scheduled[item[1].id][0], scheduled[item[1].id][1], item[1].id
-            ) if item[1].id in scheduled else (1, item[0], 0, 0))
+
+            def sort_key(item):
+                index, topic = item
+                if topic.id not in scheduled:
+                    return (1, index, 0, 0, 0)
+                starts_at, room_order, _label = scheduled[topic.id]
+                day_distance = (starts_at.date() - today).days
+                if day_distance < 0:
+                    # 어제 → 그 이전 순으로, 미배정 주제 아래에 표시한다.
+                    return (2, abs(day_distance), starts_at, room_order, topic.id)
+                return (0, day_distance, starts_at, room_order, topic.id)
+
+            indexed_topics.sort(key=sort_key)
             topics = [topic for _, topic in indexed_topics]
 
             cards = [

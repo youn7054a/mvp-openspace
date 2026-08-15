@@ -540,6 +540,34 @@ def test_topic_list_sorts_scheduled_cards_by_date_time_and_table(client, admin_c
     assert "2026.08.15 · 13:30–14:10 · 1번 테이블" in page
 
 
+def test_topic_list_places_past_scheduled_topics_below_unscheduled(client, admin_client,
+                                                                     monkeypatch):
+    from datetime import date
+    from app.routes import public
+
+    monkeypatch.setattr(public, "_openspace_today", lambda: date(2026, 8, 15))
+    admin_client.post("/admin/rooms", data={"name": "1번 테이블", "sort_order": "0"})
+    for day in ("2026-08-14", "2026-08-15", "2026-08-16"):
+        admin_client.post("/admin/timeslots", data={
+            "date": day, "start_time": "13:30", "slot_minutes": "40",
+            "break_minutes": "0", "count": "1"})
+    past_id = _submit_topic(client, title="지난 주제", email="past@example.com")
+    today_id = _submit_topic(client, title="오늘 주제", email="today@example.com")
+    future_id = _submit_topic(client, title="내일 주제", email="future@example.com")
+    _submit_topic(client, title="미배정 주제", email="open@example.com")
+    with get_session() as db:
+        room = db.exec(select(Room)).first()
+        slots = {slot.starts_at.date().isoformat(): slot for slot in db.exec(select(Timeslot))}
+    for topic_id, day in ((past_id, "2026-08-14"), (today_id, "2026-08-15"),
+                          (future_id, "2026-08-16")):
+        admin_client.post(f"/admin/topics/{topic_id}/schedule",
+                          data={"slot": f"{room.id}:{slots[day].id}"})
+
+    page = client.get("/topics").text
+    assert page.index("오늘 주제") < page.index("내일 주제")
+    assert page.index("내일 주제") < page.index("미배정 주제") < page.index("지난 주제")
+
+
 def test_admin_schedule_rejects_double_booking(client, admin_client):
     from app.models import ScheduleEntry
 
