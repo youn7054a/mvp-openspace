@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 from .models import (
     AutoBoardURL, BoardLanguageSetting, BoardQR, LightningApplication, LightningQR, LightningSession,
     LightningSetting,
-    Room, RoomSlotClosure, ScheduleEntry, Timeslot, Topic,
+    Room, RoomSlotClosure, ScheduleEntry, ScrollBoardSetting, Timeslot, Topic,
 )
 
 # 참가자 타임테이블 등록이 열리는 시점 (Self-scheduling opens) — 행사 시작 N일 전부터.
@@ -130,6 +130,12 @@ def auto_board_urls(session: Session) -> list[AutoBoardURL]:
     return list(session.exec(
         select(AutoBoardURL).order_by(AutoBoardURL.sort_order, AutoBoardURL.id)
     ))
+
+
+def scroll_board_url(session: Session) -> str:
+    """자동 스크롤 전광판에 표시할 내부 URL."""
+    setting = session.get(ScrollBoardSetting, 1)
+    return (setting.url or "").strip() if setting else ""
 
 
 def lightning_sessions(session: Session) -> list[LightningSession]:

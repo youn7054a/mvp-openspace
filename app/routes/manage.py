@@ -17,6 +17,7 @@ from fasthtml.common import (
     RedirectResponse,
     Section,
     Small,
+    Span,
 )
 from starlette.datastructures import UploadFile
 
@@ -29,7 +30,7 @@ from ..components import (
 )
 from ..database import get_session
 from ..i18n import t
-from ..models import Room, Timeslot, utcnow
+from ..models import Room, Timeslot, TopicKind, utcnow
 from ..queries import entry_for_topic, get_owned_topic
 from ..uploads import (
     UploadError,
@@ -100,6 +101,29 @@ def _image_edit_fields(topic):
     return Fieldset(*children, cls="image-fields")
 
 
+def _kind_edit_fields(topic):
+    """작성자가 자신의 주제 유형을 바꾸는 선택 영역."""
+    choices = [
+        ("conversation", t("대화", "Conversation")),
+        ("event", t("이벤트", "Event")),
+    ]
+    current = "event" if topic.is_event else "conversation"
+    return Fieldset(
+        Legend(t("주제 유형", "Topic type")),
+        Input(type="hidden", name="original_kind", value=current),
+        Div(*[
+            Label(Input(type="radio", name="kind", value=value,
+                        checked=(value == current)),
+                  Span(label, cls="kind-name"), cls="kind-option")
+            for value, label in choices
+        ], cls="kind-options"),
+        Small(t("유형을 변경하면 기존 타임테이블 배정은 해제됩니다.",
+                "Changing the type removes an existing timetable assignment."),
+              cls="field-help"),
+        cls="kind-fields",
+    )
+
+
 def _panel(session, topic, *, msg=None):
     """관리 패널 (Manage panel) — HTMX swap 대상."""
     tid = topic.id
@@ -107,13 +131,23 @@ def _panel(session, topic, *, msg=None):
     if msg:
         # 화면에 떠서 슬라이드 인 + 자동 사라짐 — 스크롤 위치와 무관하게 눈에 띔
         children.append(Div(msg, cls="manage-toast", aria_live="polite"))
+    entry = entry_for_topic(session, topic.id)
+    change_confirm = (
+        "if(this.elements['kind'].value!==this.elements['original_kind'].value)"
+        "{return confirm(" + repr(t(
+            "유형을 바꾸면 현재 배정이 해제됩니다. 계속할까요?",
+            "Changing the type will remove the current schedule. Continue?"
+        )) + ");}return true;"
+    ) if entry else None
     edit_form = Form(
         account_field(topic.host_email),
         *topic_text_fields(topic),
+        _kind_edit_fields(topic),
         _image_edit_fields(topic),
         Button(t("저장", "Save"), type="submit"),
         hx_post=f"/manage/{tid}/edit", hx_encoding="multipart/form-data",
         hx_target=f"#{PANEL_ID}", hx_swap="outerHTML",
+        **({"onsubmit": change_confirm} if change_confirm else {}),
     )
     delete_form = Form(
         Button(t("주제 삭제", "Delete topic"), type="submit", cls="danger"),
@@ -150,6 +184,7 @@ def register(app) -> None:
     @app.post("/manage/{topic_id}/edit")
     async def manage_edit(request, session, topic_id: int, title: str,
                           host_name: str = "", description: str = "",
+                          kind: str = "conversation",
                           image_url: str = "", remove_image: str = "",
                           image_file: UploadFile = None):
         identity = resolve_identity(request, session)
@@ -183,6 +218,12 @@ def register(app) -> None:
             topic.title = title
             topic.host_name = (host_name or "").strip()
             topic.description = (description or "").strip()
+            new_kind = TopicKind.EVENT if kind == "event" else TopicKind.CONVERSATION
+            if topic.kind != new_kind:
+                entry = entry_for_topic(db, topic.id)
+                if entry:
+                    db.delete(entry)
+                topic.kind = new_kind
             topic.updated_at = utcnow()
             db.add(topic)
             db.commit()

@@ -6,7 +6,7 @@ from sqlmodel import select
 from app.database import get_session
 from app.models import (
     BoardQR, LightningApplication, LightningQR, LightningStatus, Room, RoomSlotClosure,
-    Timeslot, Topic,
+    ScheduleEntry, Timeslot, Topic, TopicKind,
 )
 
 
@@ -89,11 +89,45 @@ def test_room_specific_slot_closure_blocks_conversation_but_keeps_event(admin_cl
         from app.models import ScheduleEntry
         assert db.exec(select(ScheduleEntry).where(ScheduleEntry.topic_id == event_id)).first()
 
-    assert "이벤트 진행 중" in client.get("/board2").text
+    board2 = client.get("/board2").text
+    assert "시간만 쓰는 이벤트" in board2
+    assert "이벤트 진행 중" not in board2
+    assert "시간만 쓰는 이벤트" in client.get("/board").text
     admin_client.post(f"/admin/timetable/room-slot/{room_id}/{ts_id}/open",
                       headers={"hx-request": "true"})
     with get_session() as db:
         assert db.exec(select(RoomSlotClosure)).first() is None
+
+
+def test_admin_changes_topic_type_and_unassigns_existing_schedule(admin_client, client):
+    room_id, ts_id = _seed_room_and_slot(admin_client)
+    topic_id = _submit_topic(client, title="유형 전환 주제")
+    admin_client.post(f"/admin/topics/{topic_id}/schedule",
+                      data={"slot": f"{room_id}:{ts_id}"})
+    page = admin_client.get("/admin/topics").text
+    assert "유형을 바꾸면 현재 배정이 해제됩니다" in page
+
+    admin_client.post(f"/admin/topics/{topic_id}/kind", data={"kind": "event"})
+    with get_session() as db:
+        topic = db.get(Topic, topic_id)
+        assert topic.kind == TopicKind.EVENT
+        assert db.exec(select(ScheduleEntry).where(ScheduleEntry.topic_id == topic_id)).first() is None
+
+
+def test_owner_changes_topic_type_and_unassigns_existing_schedule(admin_client, client):
+    room_id, ts_id = _seed_room_and_slot(admin_client)
+    topic_id = _submit_topic(client, title="작성자 유형 전환")
+    client.post(f"/schedule/{topic_id}/take", data={"slot": f"{room_id}:{ts_id}"})
+    page = client.get(f"/manage/{topic_id}").text
+    assert "유형을 바꾸면 현재 배정이 해제됩니다" in page
+
+    client.post(f"/manage/{topic_id}/edit", data={
+        "title": "작성자 유형 전환", "kind": "event",
+    })
+    with get_session() as db:
+        topic = db.get(Topic, topic_id)
+        assert topic.kind == TopicKind.EVENT
+        assert db.exec(select(ScheduleEntry).where(ScheduleEntry.topic_id == topic_id)).first() is None
 
 
 def test_lightning_application_admin_flow_and_private_data(client, admin_client, monkeypatch):
@@ -105,7 +139,8 @@ def test_lightning_application_admin_flow_and_private_data(client, admin_client,
     second_id = _add_light_session(admin_client, "2026-08-16")
     admin_client.post(f"/admin/light/{first_id}/update", data={
         "board_title": "오늘의 라이트닝 토크", "starts_at": "18:00",
-        "venue": "원흥관 3층", "description": "정규 세션 종료 후 진행",
+        "venue": "원흥관 3층", "venue_en": "Wonheung Hall 3F",
+        "description": "정규 세션 종료 후 진행",
     })
     admin_client.post("/admin/light/notice", data={
         "application_notice": "양일 공통 신청 안내입니다.",
@@ -151,9 +186,13 @@ def test_lightning_application_admin_flow_and_private_data(client, admin_client,
     monkeypatch.setattr(light, "_today", lambda: date(2026, 8, 15))
     board = client.get("/light/board").text
     assert "라이트닝 토크" in board
+    assert "https://example.com/light-qr.png" in board
     assert "오늘의 라이트닝 토크" not in board and "18시 00분" not in board
     assert "원흥관 3층" not in board and "신청 안내" not in board
     assert "speaker@example.com" not in board and "나의 라이트닝 스토리" not in board
+    english_board = client.get("/light/board?board_lang=en").text
+    assert "Lightning Talk" in english_board
+    assert "18:00" not in english_board and "Wonheung Hall 3F" not in english_board
 
 
 def test_admin_can_upload_lightning_qr_image(admin_client, client, monkeypatch):
@@ -646,6 +685,14 @@ def test_nav_shows_participant_items_only(client):
     assert "전광판 (Display Board)" not in nav
 
 
+def test_programs_page_lists_all_programs(client):
+    page = client.get("/programs")
+    assert page.status_code == 200
+    for title in ["열린 공간", "저글링", "작품 전시전", "파이콘 네임월", "파이펀 퀴즈", "파이북"]:
+        assert title in page.text
+    assert 'href="/topics"' in page.text
+
+
 def _submit(client, *, email, title, pycon_id=0):
     login(client, email, pycon_id)
     r = client.post("/topics/new", data={"title": title, "description": "d"})
@@ -916,6 +963,13 @@ def test_board3_shows_registered_qr(client, admin_client):
     assert "주제 등록하기" not in page
     assert "Submit" in client.get("/board3?board_lang=en").text
     assert "https://example.com/board2-qr.png" not in client.get("/board2").text
+
+
+def test_admin_configures_scroll_board_url(client, admin_client):
+    admin_client.post("/admin/scroll-board", data={"url": "/topics"})
+    page = client.get("/scroll-board").text
+    assert 'src="/topics"' in page
+    assert "scroll-board-frame" in page
 
 
 def test_board_shows_full_timetable(client, admin_client):
