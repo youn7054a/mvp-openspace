@@ -297,7 +297,7 @@ def test_participant_can_delete_own_lightning_application(client, admin_client, 
     assert application is None
 
 
-def test_lightning_application_list_can_reorder_and_reject_moves_to_end(admin_client):
+def test_lightning_application_list_defaults_to_submission_order(admin_client):
     session_id = _add_light_session(admin_client, "2026-08-15")
     with get_session() as db:
         first = LightningApplication(session_id=session_id, applicant_email="one@example.com",
@@ -311,6 +311,10 @@ def test_lightning_application_list_can_reorder_and_reject_moves_to_end(admin_cl
     with get_session() as db:
         first, second = db.get(LightningApplication, first_id), db.get(LightningApplication, second_id)
         assert second.presentation_order == 1 and first.presentation_order == 2
+    # 신청 목록은 발표 순서를 바꿔도 접수 순서대로 보여 준다.
+    page = admin_client.get(f"/admin/light/applications?session_id={session_id}").text
+    assert page.index("첫째") < page.index("둘째")
+    assert 'name="presentation_order" value="2"' in page
     admin_client.post(f"/admin/light/applications/{second_id}/reject?session_id={session_id}")
     with get_session() as db:
         first, second = db.get(LightningApplication, first_id), db.get(LightningApplication, second_id)

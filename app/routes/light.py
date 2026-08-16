@@ -182,12 +182,17 @@ def _next_order(db, session_id: int) -> int:
 
 
 def _application_sort_key(application):
-    """신청 목록: 발표 순서대로, 불합격자는 항상 마지막."""
+    """발표 순서 변경에 사용하는 정렬 키. 불합격자는 항상 마지막."""
     return (
         application.status == LightningStatus.REJECTED,
         application.presentation_order or application.id or 0,
         application.created_at,
     )
+
+
+def _application_submission_sort_key(application):
+    """관리 신청 목록의 기본 정렬 키: 먼저 접수한 신청부터 표시한다."""
+    return (application.created_at, application.id or 0)
 
 
 def _move_presentation_order(db, application, requested_order: int) -> None:
@@ -240,7 +245,8 @@ def _admin_application_rows(applications, session_id: int):
                  onsubmit=f"return confirm('{t('이 신청 내역을 삭제할까요?', 'Delete this application?')}')",
                  style="display:inline"),
         )
-        order = (Form(Input(type="number", name="presentation_order", value=str(number), min="1"),
+        order = (Form(Input(type="number", name="presentation_order",
+                            value=str(application.presentation_order or number), min="1"),
                       Button(t("발표 순서 저장", "Save presentation order"), type="submit", cls="secondary"),
                       method="post", action=f"/admin/light/applications/{application.id}/order?session_id={session_id}")
                  if application.status != LightningStatus.REJECTED else "—")
@@ -516,7 +522,7 @@ def register(app) -> None:
             selected = next((item for item in sessions if item.id == session_id),
                             sessions[0] if sessions else None)
             applications = (sorted(list(db.exec(select(LightningApplication).where(
-                LightningApplication.session_id == selected.id))), key=_application_sort_key)
+                LightningApplication.session_id == selected.id))), key=_application_submission_sort_key)
                             if selected else [])
         date_links = Div(*[
             A(f"{item.session_date:%m월 %d일}",
