@@ -166,7 +166,7 @@ def test_lightning_application_admin_flow_and_private_data(client, admin_client,
     with get_session() as db:
         first_app = db.get(LightningApplication, first_app.id)
         assert first_app.status == LightningStatus.ACCEPTED
-        assert first_app.presentation_order == 1
+        assert first_app.presentation_order is None
 
     # 다른 행사일에도 당일에만 신청할 수 있다. 양일 신청은 가능하지만 한 날짜
     # 합격자는 다른 날짜 합격 처리하지 않는다.
@@ -297,7 +297,7 @@ def test_participant_can_delete_own_lightning_application(client, admin_client, 
     assert application is None
 
 
-def test_lightning_application_list_defaults_to_submission_order_until_reordered(admin_client):
+def test_lightning_application_list_defaults_to_submission_order_until_order_is_set(admin_client):
     session_id = _add_light_session(admin_client, "2026-08-15")
     with get_session() as db:
         first = LightningApplication(session_id=session_id, applicant_email="one@example.com",
@@ -310,19 +310,19 @@ def test_lightning_application_list_defaults_to_submission_order_until_reordered
     page = admin_client.get(f"/admin/light/applications?session_id={session_id}").text
     assert page.index("첫째") < page.index("둘째")
     admin_client.post(f"/admin/light/applications/{second_id}/order?session_id={session_id}",
-                      data={"presentation_order": "1"})
+                      data={"presentation_order": "-10"})
     with get_session() as db:
         first, second = db.get(LightningApplication, first_id), db.get(LightningApplication, second_id)
-        assert second.presentation_order == 1 and first.presentation_order == 2
-    # 운영자가 지정한 발표 순서가 접수 순서보다 우선한다.
+        assert second.presentation_order == -10 and first.presentation_order == 1
+    # 운영자가 입력한 숫자의 오름차순이 접수 순서보다 우선한다.
     page = admin_client.get(f"/admin/light/applications?session_id={session_id}").text
     assert page.index("둘째") < page.index("첫째")
-    assert 'name="presentation_order" value="1"' in page
+    assert 'name="presentation_order" value="-10"' in page
     admin_client.post(f"/admin/light/applications/{second_id}/reject?session_id={session_id}")
     with get_session() as db:
         first, second = db.get(LightningApplication, first_id), db.get(LightningApplication, second_id)
         assert second.status == LightningStatus.REJECTED
-        assert second.presentation_order > first.presentation_order
+        assert second.presentation_order == -10
     page = admin_client.get(f"/admin/light/applications?session_id={session_id}").text
     assert page.index("첫째") < page.index("둘째")
     assert "light-application-rejected" in page
