@@ -174,18 +174,10 @@ def _light_form(light_session, application=None, default_name: str = ""):
     )
 
 
-def _next_order(db, session_id: int) -> int:
-    applications = list(db.exec(select(LightningApplication).where(
-        LightningApplication.session_id == session_id,
-    )))
-    return max((app.presentation_order or 0 for app in applications), default=0) + 1
-
-
 def _application_sort_key(application):
-    """발표 순서 변경에 사용하는 정렬 키. 불합격자는 항상 마지막."""
+    """지정된 발표 순서의 오름차순 정렬 키."""
     return (
-        application.status == LightningStatus.REJECTED,
-        application.presentation_order or application.id or 0,
+        application.presentation_order,
         application.created_at,
     )
 
@@ -196,32 +188,13 @@ def _application_submission_sort_key(application):
 
 
 def _application_display_order(applications):
-    """기본은 접수 순서, 운영자가 발표 순서를 바꾸면 그 순서를 우선한다."""
+    """기본은 접수 순서, 지정된 발표 순서는 숫자 오름차순으로 우선한다."""
     submitted = sorted(applications, key=_application_submission_sort_key)
     active = [item for item in submitted if item.status != LightningStatus.REJECTED]
     rejected = [item for item in submitted if item.status == LightningStatus.REJECTED]
-    # 새 신청에는 접수 순서와 같은 발표 순서가 자동으로 붙는다. 이 값과 달라진
-    # 신청은 운영자가 순서를 조정한 것이므로, 지정한 발표 순서로 앞에 표시한다.
-    prioritized = [item for position, item in enumerate(active, start=1)
-                   if item.presentation_order is not None and item.presentation_order != position]
-    unprioritized = [item for position, item in enumerate(active, start=1)
-                     if item.presentation_order is None or item.presentation_order == position]
+    prioritized = [item for item in active if item.presentation_order is not None]
+    unprioritized = [item for item in active if item.presentation_order is None]
     return sorted(prioritized, key=_application_sort_key) + unprioritized + rejected
-
-
-def _move_presentation_order(db, application, requested_order: int) -> None:
-    """불합격자를 제외한 신청 목록에서 발표 순서를 원하는 번호로 옮긴다."""
-    applications = list(db.exec(select(LightningApplication).where(
-        LightningApplication.session_id == application.session_id,
-    )))
-    active = sorted((item for item in applications
-                     if item.status != LightningStatus.REJECTED and item.id != application.id),
-                    key=_application_sort_key)
-    position = max(1, min(requested_order, len(active) + 1))
-    active.insert(position - 1, application)
-    for order, item in enumerate(active, start=1):
-        item.presentation_order, item.updated_at = order, utcnow()
-        db.add(item)
 
 
 def _accepted_on_other_date(db, application, target_session) -> LightningSession | None:
@@ -260,7 +233,8 @@ def _admin_application_rows(applications, session_id: int):
                  style="display:inline"),
         )
         order = (Form(Input(type="number", name="presentation_order",
-                            value=str(application.presentation_order or number), min="1"),
+                            value=(str(application.presentation_order)
+                                   if application.presentation_order is not None else "")),
                       Button(t("발표 순서 저장", "Save presentation order"), type="submit", cls="secondary"),
                       method="post", action=f"/admin/light/applications/{application.id}/order?session_id={session_id}")
                  if application.status != LightningStatus.REJECTED else "—")
@@ -356,7 +330,7 @@ def register(app) -> None:
                 applicant_email=identity.email, applicant_username=identity.username,
                 title=title, description=(description or "").strip(), presentation_url=material,
                 status=(LightningStatus.PENDING if item.is_open else LightningStatus.WAITLIST),
-                presentation_order=_next_order(db, item.id),
+                presentation_order=None,
             ))
             try:
                 db.commit()
@@ -627,8 +601,6 @@ def register(app) -> None:
                       href=f"/admin/light/applications?session_id={session_id}", cls="btn secondary"))
             if application:
                 application.status = LightningStatus.ACCEPTED
-                if application.presentation_order is None:
-                    application.presentation_order = _next_order(db, application.session_id)
                 application.updated_at = utcnow(); db.add(application); db.commit()
         return RedirectResponse(f"/admin/light/applications?session_id={session_id}", status_code=303)
 
@@ -640,8 +612,6 @@ def register(app) -> None:
             application = db.get(LightningApplication, application_id)
             if application:
                 application.status = LightningStatus.REJECTED
-                # 불합격자는 발표 순서상 맨 아래로 이동한다.
-                application.presentation_order = _next_order(db, application.session_id)
                 application.updated_at = utcnow(); db.add(application); db.commit()
         return RedirectResponse(f"/admin/light/applications?session_id={session_id}", status_code=303)
 
@@ -657,14 +627,16 @@ def register(app) -> None:
         return RedirectResponse(f"/admin/light/applications?session_id={session_id}", status_code=303)
 
     @app.post("/admin/light/applications/{application_id}/order")
-    def admin_light_order(session, application_id: int, presentation_order: int = 0,
+    def admin_light_order(session, application_id: int, presentation_order: int | None = None,
                           session_id: int = 0):
         if (redir := _require_admin(session)):
             return redir
         with get_session() as db:
             application = db.get(LightningApplication, application_id)
-            if application and application.status != LightningStatus.REJECTED and presentation_order > 0:
-                _move_presentation_order(db, application, presentation_order)
+            if application and application.status != LightningStatus.REJECTED and presentation_order is not None:
+                application.presentation_order = presentation_order
+                application.updated_at = utcnow()
+                db.add(application)
                 db.commit()
         return RedirectResponse(f"/admin/light/applications?session_id={session_id}", status_code=303)
 
