@@ -195,6 +195,20 @@ def _application_submission_sort_key(application):
     return (application.created_at, application.id or 0)
 
 
+def _application_display_order(applications):
+    """기본은 접수 순서, 운영자가 발표 순서를 바꾸면 그 순서를 우선한다."""
+    submitted = sorted(applications, key=_application_submission_sort_key)
+    active = [item for item in submitted if item.status != LightningStatus.REJECTED]
+    rejected = [item for item in submitted if item.status == LightningStatus.REJECTED]
+    # 새 신청에는 접수 순서와 같은 발표 순서가 자동으로 붙는다. 이 값과 달라진
+    # 신청은 운영자가 순서를 조정한 것이므로, 지정한 발표 순서로 앞에 표시한다.
+    prioritized = [item for position, item in enumerate(active, start=1)
+                   if item.presentation_order is not None and item.presentation_order != position]
+    unprioritized = [item for position, item in enumerate(active, start=1)
+                     if item.presentation_order is None or item.presentation_order == position]
+    return sorted(prioritized, key=_application_sort_key) + unprioritized + rejected
+
+
 def _move_presentation_order(db, application, requested_order: int) -> None:
     """불합격자를 제외한 신청 목록에서 발표 순서를 원하는 번호로 옮긴다."""
     applications = list(db.exec(select(LightningApplication).where(
@@ -521,8 +535,8 @@ def register(app) -> None:
             sessions = lightning_sessions(db)
             selected = next((item for item in sessions if item.id == session_id),
                             sessions[0] if sessions else None)
-            applications = (sorted(list(db.exec(select(LightningApplication).where(
-                LightningApplication.session_id == selected.id))), key=_application_submission_sort_key)
+            applications = (_application_display_order(list(db.exec(select(LightningApplication).where(
+                LightningApplication.session_id == selected.id))))
                             if selected else [])
         date_links = Div(*[
             A(f"{item.session_date:%m월 %d일}",
